@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --font-primary: 'Inter', system-ui, sans-serif;
+  --bg-gradient: linear-gradient(135deg, #180c05 0%, #0c0502 50%, #180c05 100%);
+  --accent-primary: #f97316; /* Naranja cálido */
+  --accent-primary-hover: #ea580c; /* Naranja más oscuro */
+  --accent-glow: rgba(249, 115, 22, 0.3);
+  --glass-bg: rgba(30, 15, 8, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --text-primary: #fffbeb; /* Blanco crema cálido */
+  --text-secondary: #fed7aa; /* Durazno suave */
+  --text-muted: #a16207; /* Amarillo oscuro / dorado */
+  --success: #10b981;
+  --error: #ef4444;
+  --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-primary);
+  background: var(--bg-gradient);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
