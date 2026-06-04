@@ -1,0 +1,9 @@
+{
+  "name": "calibre-root",
+  "version": "1.0.0",
+  "description": "Script raíz para Calibre Desktop",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "start": "npm run electron:dev --prefix frontend"
+  }
+}

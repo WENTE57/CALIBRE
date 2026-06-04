@@ -1,88 +1,115 @@
-# Calibre Desktop (Comida Rápida)
+# 🍔 Calibre Desktop — Food System
 
-Este proyecto es una aplicación de escritorio nativa desarrollada con **React (Vite)** para la interfaz visual y **Node.js (Express)** para el servidor backend, todo empaquetado mediante **Electron**. Está diseñada para administrar el sistema de un local de comida rápida.
+Este proyecto es una aplicación de escritorio nativa diseñada y desarrollada para administrar el sistema de un local de comida rápida. Está construida usando una arquitectura moderna integrada por **React (Vite)** para el frontend, **Node.js (Express)** para el servidor backend, **PostgreSQL** para la persistencia de datos y **Electron** como el entorno de ejecución de escritorio nativo.
 
-La base de datos utilizada es **PostgreSQL**.
+La aplicación destaca por su diseño premium y oscuro estilo **Obsidian**, con gradients naranja/rojo y componentes de vidrio esmerilado (glassmorphism).
+
+---
+
+## ✨ Características Principales
+
+*   **Autenticación y Roles:** Sistema de login seguro con roles diferenciados (ej. Administrador).
+*   **Gestión Dinámica de Categorías (CRUD):** Creación, edición y eliminación de categorías en tiempo real. La eliminación de categorías reasigna de manera segura los productos a la categoría por defecto (`Otros`).
+*   **Catálogo de Productos y Recetas:** Registro completo de productos con nombre, precio, emoji representativo, categoría e ingredientes asociados indicando la cantidad exacta requerida.
+*   **Inventario de Ingredientes:** Control del stock y almacenamiento de ingredientes de cocina individuales.
+*   **Diálogos e Interfaces Modales Premium:** Sistema de alertas y confirmaciones integrado en React que sustituye por completo los diálogos nativos del sistema, solucionando los problemas de bloqueo de foco en el cliente de Electron en sistemas Windows.
+*   **Integración en un solo comando:** El entorno de desarrollo de Electron inicia automáticamente el servidor de desarrollo de Vite y el servidor de la API Express.
 
 ---
 
 ## 🛠️ Requisitos Previos
 
 Asegúrate de tener instalado en tu sistema:
-- [Node.js](https://nodejs.org/) (Versión 18 o superior recomendada. Probado en v25.2.1)
-- [PostgreSQL](https://www.postgresql.org/) corriendo localmente.
+*   [Node.js](https://nodejs.org/) (Versión 18 o superior recomendada. Probado en v25.2.1)
+*   [PostgreSQL](https://www.postgresql.org/) con el servidor activo localmente.
 
 ---
 
 ## 🚀 Guía de Configuración y Arranque
 
-Cualquier desarrollador que clone este repositorio puede levantar el proyecto en su máquina local siguiendo estos pasos:
+Sigue estos sencillos pasos para levantar el proyecto en tu máquina local desde cero:
 
 ### 1. Clonar el repositorio e instalar dependencias
 
-Abre una consola e instala las dependencias de ambas carpetas:
+Clona este repositorio en tu sistema y luego ingresa a cada una de las carpetas para instalar las dependencias de Node:
 
 ```bash
-# Instalar dependencias del Backend
+# 1. Clonar el repositorio
+git clone <url-del-repositorio>
+cd "proyecto calibre 25"
+
+# 2. Instalar dependencias del Backend
 cd backend
 npm install
 
-# Instalar dependencias del Frontend (y Electron)
+# 3. Instalar dependencias del Frontend
 cd ../frontend
 npm install
 ```
 
-### 2. Configurar la Base de Datos y Variables de Entorno
+### 2. Configurar la Base de Datos y Entorno
 
-1. Abre PostgreSQL y crea una base de datos vacía llamada `calibre`:
-   ```sql
-   CREATE DATABASE calibre;
-   ```
-2. En la carpeta `backend`, duplica el archivo `.env.example` y renómbralo como `.env`:
-   - En Windows/Linux puedes hacerlo manualmente o por consola:
-     ```bash
-     cp .env.example .env
-     ```
-3. Edita el archivo `.env` recién creado y coloca tu contraseña de PostgreSQL en la variable `DB_PASSWORD`:
-   ```env
-   DB_PASSWORD=tu_contraseña_aqui
-   ```
+1.  Abre tu terminal de PostgreSQL (o herramienta de administración como pgAdmin/DBeaver) y crea una base de datos vacía llamada `calibre`:
+    ```sql
+    CREATE DATABASE calibre;
+    ```
+2.  En la carpeta `backend`, duplica el archivo `.env.example` y renómbralo a `.env`:
+    *   **Windows (PowerShell):**
+        ```powershell
+        copy .env.example .env
+        ```
+    *   **Linux/macOS/Git Bash:**
+        ```bash
+        cp .env.example .env
+        ```
+3.  Edita el archivo `backend/.env` y reemplaza los campos correspondientes a tu usuario y contraseña de PostgreSQL:
+    ```env
+    PORT=5000
+    DB_USER=postgres
+    DB_PASSWORD=tu_contraseña_aqui
+    DB_HOST=localhost
+    DB_PORT=5432
+    DB_DATABASE=calibre
+    ```
 
-### 3. Ejecutar las Migraciones (Crear tablas y semilla de usuario)
+### 3. Ejecutar las Migraciones y Cargar Semillas
 
-Para crear automáticamente la tabla de usuarios e insertar un usuario administrador de prueba sin necesidad de importar archivos SQL complejos, ejecuta el siguiente comando desde la carpeta `backend`:
+Para crear la estructura completa de tablas e insertar datos iniciales de prueba (usuarios, categorías base, ingredientes y recetas), ejecuta el siguiente script en la carpeta `backend`:
 
 ```bash
 cd backend
 npm run db:setup
 ```
 
-Esto creará automáticamente la tabla `usuarios` y registrará las siguientes credenciales de prueba:
-* **Usuario:** `Juan Pérez`
-* **Contraseña:** `mi_contrasena_segura`
+Esto generará automáticamente:
+*   Las tablas `usuarios`, `categorias`, `productos`, `ingredientes` y `producto_ingredientes`.
+*   El **Usuario Administrador por defecto**:
+    *   **Usuario:** `Juan Perez`
+    *   **Contraseña:** `123456`
+*   Categorías iniciales (`General`, `Acompañamientos`, `Bebestibles`).
+*   Ingredientes semilla (Pan, Carne de Res, Queso Cheddar, etc.).
+*   Productos base (con sus ingredientes correspondientes asociados).
 
 ---
 
 ## 💻 Ejecución en Modo de Desarrollo
 
-Ya no es necesario levantar el backend y el frontend por separado en dos terminales. Electron se encarga de todo.
+Para iniciar el flujo de desarrollo integrado (servidores + cliente de escritorio), navega a la carpeta del frontend y arranca el entorno:
 
-1. Navega a la carpeta `frontend`:
-   ```bash
-   cd frontend
-   ```
-2. Ejecuta el script de desarrollo de escritorio:
-   ```bash
-   npm run electron:dev
-   ```
+```bash
+cd frontend
+npm run electron:dev
+```
 
-Este comando:
-- Arrancará el servidor de desarrollo de Vite.
-- Levantará de forma automática el servidor backend en segundo plano (puerto 5000).
-- Abrirá la ventana nativa de escritorio de Electron cargando el login.
+Este comando automatizado:
+1.  Inicia el servidor de desarrollo de Vite para el Frontend.
+2.  Levanta el servidor Express del Backend en segundo plano (puerto `5000`).
+3.  Abre el contenedor de escritorio nativo de **Electron** apuntando a la aplicación.
 
 ---
 
-## 🔒 Seguridad en Git
+## 🔒 Estructura y Seguridad en Git
 
-Los archivos sensibles como `.env` (que contienen contraseñas de bases de datos) y carpetas pesadas como `node_modules` están protegidos por el archivo `.gitignore` en la raíz del proyecto para evitar que se suban accidentalmente a GitHub.
+*   **Exclusión de Datos Sensibles:** Los archivos `.env` locales (que guardan contraseñas y accesos a bases de datos) están protegidos mediante el archivo `.gitignore` en la raíz del proyecto. **Nunca** deben ser subidos al repositorio público.
+*   **Exclusión de Dependencias:** Las carpetas `node_modules/` de todas las secciones del proyecto están debidamente ignoradas. Cada desarrollador las descarga localmente con `npm install`.
+*   **Portabilidad:** Toda configuración específica o base de datos local no es guardada físicamente en el repositorio Git. Toda la estructura y datos de partida se recrean dinámicamente usando el comando `npm run db:setup`.

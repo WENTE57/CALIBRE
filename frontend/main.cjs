@@ -43,11 +43,15 @@ function startBackend() {
 
   console.log(`[Electron] Iniciando servidor backend desde: ${backendPath}`);
 
+  const backendDir = path.dirname(backendPath);
+
   // Se inicia el proceso con node, pasando la ruta y heredando variables de entorno
+  // Desactivamos shell: true para que maneje correctamente espacios en la ruta y evitar advertencias de seguridad
   backendProcess = spawn('node', [backendPath], {
+    cwd: backendDir,
     env: { ...process.env, PORT: 5000 },
     stdio: 'inherit',
-    shell: true
+    shell: false
   });
 
   backendProcess.on('error', (err) => {
