@@ -1336,4 +1336,199 @@
   border-radius: 10px !important;
 }
 
+/* Comanda Physical-Style Ticket Card */
+.comanda-ticket-card {
+  background: #191616; /* Color muy oscuro cálido */
+  border: 2px dashed rgba(239, 68, 68, 0.4);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75), 0 0 15px rgba(239, 68, 68, 0.15);
+  border-radius: 12px;
+  width: 95%;
+  max-width: 440px;
+  padding: 2.25rem 2rem;
+  font-family: 'Courier New', Courier, monospace; /* Tipografía tipo ticket térmico */
+  color: #f3f4f6;
+  position: relative;
+  animation: ticketSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes ticketSlideIn {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.comanda-header {
+  text-align: center;
+  border-bottom: 2px dashed rgba(255, 255, 255, 0.15);
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.comanda-client-name {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 0.35rem 0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.comanda-local-name {
+  font-size: 1.05rem;
+  color: var(--accent-primary);
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+}
+
+.comanda-ticket-number {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #fff;
+  background: rgba(239, 68, 68, 0.15);
+  display: inline-block;
+  padding: 0.2rem 0.8rem;
+  border-radius: 6px;
+  margin: 0.35rem 0;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.comanda-date-time {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #9ca3af;
+  margin-top: 0.5rem;
+}
+
+.comanda-body {
+  margin-bottom: 1.5rem;
+}
+
+.comanda-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.comanda-table th {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.5rem 0;
+  color: #9ca3af;
+  font-weight: 600;
+  text-align: left;
+}
+
+.comanda-table td {
+  padding: 0.65rem 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.comanda-footer {
+  border-top: 2px dashed rgba(255, 255, 255, 0.15);
+  padding-top: 1.25rem;
+  margin-bottom: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.comanda-attendant {
+  font-size: 0.85rem;
+  color: #9ca3af;
+  font-style: italic;
+  text-align: left;
+}
+
+.comanda-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.comanda-total-label {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.comanda-total-value {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #ef4444;
+}
+
+.comanda-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.comanda-btn-close {
+  width: 100% !important;
+  font-family: inherit !important;
+  font-size: 0.95rem !important;
+  padding: 0.75rem !important;
+  border-radius: 8px !important;
+}
+
+/* Simplified History Row Items */
+.history-list-item-btn {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.history-list-item-btn:hover {
+  background: rgba(249, 115, 22, 0.08); /* Warm amber accent glow on hover */
+  border-color: rgba(249, 115, 22, 0.3);
+  transform: translateY(-2px);
+}
+
+/* Delivery Type Button Group */
+.delivery-selector-group {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.delivery-option-btn {
+  flex: 1;
+  padding: 0.65rem;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  text-align: center;
+}
+
+.delivery-option-btn:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.delivery-option-btn.active {
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #ef4444 100%);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
 

@@ -25,6 +25,33 @@ app.use(express.json()); // Permite procesar peticiones JSON
       )
     `);
     console.log("✅ Tabla 'categorias' asegurada.");
+
+    // 3. Asegurar tabla pedidos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pedidos (
+        id SERIAL PRIMARY KEY,
+        cliente_nombre VARCHAR(100) NOT NULL,
+        total DECIMAL(10, 2) NOT NULL,
+        fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        atendido_por VARCHAR(100) NOT NULL
+      )
+    `);
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nota TEXT");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_entrega VARCHAR(50) DEFAULT 'Servir'");
+    console.log("✅ Tabla 'pedidos' asegurada (con columnas 'nota' y 'tipo_entrega').");
+
+    // 4. Asegurar tabla pedido_productos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pedido_productos (
+        id SERIAL PRIMARY KEY,
+        pedido_id INTEGER REFERENCES pedidos(id) ON DELETE CASCADE,
+        producto_id INTEGER,
+        nombre_producto VARCHAR(150) NOT NULL,
+        cantidad INTEGER NOT NULL,
+        precio_unitario DECIMAL(10, 2) NOT NULL
+      )
+    `);
+    console.log("✅ Tabla 'pedido_productos' asegurada.");
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
@@ -508,8 +535,106 @@ app.delete('/api/categorias/:id', async (req, res) => {
   }
 });
 
+// Endpoint de Registrar Pedido
+app.post('/api/pedidos', async (req, res) => {
+  const { cliente_nombre, total, atendido_por, productos, nota, tipo_entrega } = req.body;
 
+  if (!cliente_nombre || !total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Datos del pedido incompletos o inválidos.'
+    });
+  }
 
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Insertar la cabecera del pedido
+    const orderRes = await client.query(
+      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega) VALUES ($1, $2, $3, $4, $5) RETURNING id, fecha_hora',
+      [cliente_nombre.trim(), total, atendido_por.trim(), nota ? nota.trim() : null, tipo_entrega || 'Servir']
+    );
+    const pedidoId = orderRes.rows[0].id;
+    const fechaHora = orderRes.rows[0].fecha_hora;
+
+    // 2. Insertar cada producto y descontar ingredientes del inventario
+    for (const item of productos) {
+      // Registrar el producto en el detalle del pedido
+      await client.query(
+        'INSERT INTO pedido_productos (pedido_id, producto_id, nombre_producto, cantidad, precio_unitario) VALUES ($1, $2, $3, $4, $5)',
+        [pedidoId, item.id || null, item.nombre, item.cantidad, item.precio]
+      );
+
+      // Descontar stock si el producto tiene ingredientes asociados
+      if (item.id) {
+        const recipeRes = await client.query(
+          'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
+          [item.id]
+        );
+        for (const recipeItem of recipeRes.rows) {
+          const discountAmount = parseFloat(recipeItem.cantidad) * item.cantidad;
+          await client.query(
+            'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+            [discountAmount, recipeItem.ingrediente_id]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Pedido registrado con éxito.',
+      ticket: pedidoId,
+      fecha_hora: fechaHora
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en POST /api/pedidos:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al procesar el registro del pedido.'
+    });
+  } finally {
+    client.release();
+  }
+});
+
+// Endpoint de Historial de Pedidos
+app.get('/api/pedidos', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.id, p.cliente_nombre, p.total, p.fecha_hora, p.atendido_por, p.nota, p.tipo_entrega,
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', dp.id,
+                   'producto_id', dp.producto_id,
+                   'nombre_producto', dp.nombre_producto,
+                   'cantidad', dp.cantidad,
+                   'precio_unitario', dp.precio_unitario
+                 )
+               ) FILTER (WHERE dp.id IS NOT NULL),
+               '[]'
+             ) as productos
+      FROM pedidos p
+      LEFT JOIN pedido_productos dp ON p.id = dp.pedido_id
+      GROUP BY p.id
+      ORDER BY p.fecha_hora DESC
+    `);
+    res.json({
+      success: true,
+      pedidos: result.rows
+    });
+  } catch (err) {
+    console.error('Error en GET /api/pedidos:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener el historial de pedidos.'
+    });
+  }
+});
 
 // Iniciar servidor
 app.listen(PORT, () => {

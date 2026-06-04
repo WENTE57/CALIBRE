@@ -22,7 +22,14 @@ function App() {
   const [productosError, setProductosError] = useState('');
   const [pedido, setPedido] = useState([]);
   const [pedidoConfirmado, setPedidoConfirmado] = useState(false);
-  const [activeTab, setActiveTab] = useState('pedidos'); // 'pedidos' o 'usuarios' (solo admin)
+  const [activeTab, setActiveTab] = useState('pedidos'); // 'pedidos', 'usuarios', 'productos', o 'historial'
+  const [showPromptCliente, setShowPromptCliente] = useState(false);
+  const [clienteNombre, setClienteNombre] = useState('');
+  const [pedidoNota, setPedidoNota] = useState('');
+  const [tipoEntrega, setTipoEntrega] = useState('Servir');
+  const [comandaData, setComandaData] = useState(null);
+  const [historialPedidos, setHistorialPedidos] = useState([]);
+  const [loadingHistorial, setLoadingHistorial] = useState(false);
   // Estados para administración de usuarios
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosLoading, setUsuariosLoading] = useState(false);
@@ -461,6 +468,27 @@ function App() {
     }
   }, [user, activeTab]);
 
+  useEffect(() => {
+    if (user && activeTab === 'historial') {
+      cargarHistorial();
+    }
+  }, [user, activeTab]);
+
+  const cargarHistorial = async () => {
+    setLoadingHistorial(true);
+    try {
+      const response = await fetch('http://localhost:5000/api/pedidos');
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setHistorialPedidos(data.pedidos);
+      }
+    } catch (err) {
+      console.error('Error al cargar historial:', err);
+    } finally {
+      setLoadingHistorial(false);
+    }
+  };
+
   const agregarAlPedido = (producto) => {
     setPedido((prev) => {
       const existe = prev.find((item) => item.id === producto.id);
@@ -493,11 +521,69 @@ function App() {
 
   const handleConfirmarPedido = () => {
     if (pedido.length === 0) return;
-    setPedidoConfirmado(true);
-    setPedido([]);
-    setTimeout(() => {
-      setPedidoConfirmado(false);
-    }, 4000);
+    setClienteNombre('');
+    setPedidoNota('');
+    setTipoEntrega('Servir');
+    setShowPromptCliente(true);
+  };
+
+  const handleSubmitPedido = async (e) => {
+    e.preventDefault();
+    if (!clienteNombre.trim()) {
+      abrirAlerta('Por favor, ingresa el nombre del cliente para confirmar el pedido.', 'Nombre de Cliente Requerido');
+      return;
+    }
+
+    const totalPedido = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+    const atendidoPor = user ? user.nombre : 'Desconocido';
+
+    const payload = {
+      cliente_nombre: clienteNombre.trim(),
+      total: totalPedido,
+      atendido_por: atendidoPor,
+      productos: pedido.map(item => ({
+        id: item.id,
+        nombre: item.nombre,
+        cantidad: item.cantidad,
+        precio: parseFloat(item.precio)
+      })),
+      nota: pedidoNota.trim() || null,
+      tipo_entrega: tipoEntrega
+    };
+
+    try {
+      const response = await fetch('http://localhost:5000/api/pedidos', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setComandaData({
+          ticket: data.ticket,
+          cliente: clienteNombre.trim(),
+          fecha_hora: data.fecha_hora,
+          productos: payload.productos,
+          total: totalPedido,
+          atendido_por: atendidoPor,
+          nota: payload.nota,
+          tipo_entrega: payload.tipo_entrega
+        });
+        setPedido([]);
+        setClienteNombre('');
+        setPedidoNota('');
+        setTipoEntrega('Servir');
+        setShowPromptCliente(false);
+        cargarProductos();
+      } else {
+        abrirAlerta(data.message || 'Error al registrar el pedido.', 'Error');
+      }
+    } catch (err) {
+      console.error(err);
+      abrirAlerta('Error de conexión con el servidor al registrar el pedido.', 'Error de Red');
+    }
   };
 
   const handleLogin = async (e) => {
@@ -741,6 +827,12 @@ function App() {
                   >
                     📦 Productos
                   </button>
+                  <button 
+                    onClick={() => setActiveTab('historial')} 
+                    className={`nav-tab ${activeTab === 'historial' ? 'active' : ''}`}
+                  >
+                    📋 Historial
+                  </button>
                 </div>
               )}
 
@@ -821,16 +913,6 @@ function App() {
                 <div className="order-section">
                   <h3 className="section-title">📝 Detalle del Pedido</h3>
                   
-                  {pedidoConfirmado && (
-                    <div className="alert alert-success animate-pop">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                      </svg>
-                      <span>¡Pedido realizado con éxito! (En memoria)</span>
-                    </div>
-                  )}
-
                   <div className="order-ticket">
                     {pedido.length === 0 ? (
                       <div className="empty-order">
@@ -1358,6 +1440,74 @@ function App() {
                 </div>
               </div>
             )}
+
+            {activeTab === 'historial' && user.cargo.toLowerCase() === 'administrador' && (
+              <div className="admin-container animate-fade-in" style={{ width: '100%' }}>
+                <div className="admin-card full-width">
+                  <div className="admin-card-header">
+                    <h3 className="section-title">📋 Historial de Pedidos (Tickets)</h3>
+                    <p className="section-subtitle">Visualiza todas las comandas y tickets registrados en el sistema</p>
+                  </div>
+                  
+                  {loadingHistorial ? (
+                    <div className="loading-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem' }}>
+                      <div className="spinner"></div>
+                      <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>Cargando historial...</p>
+                    </div>
+                  ) : historialPedidos.length === 0 ? (
+                    <div className="empty-order" style={{ minHeight: '200px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <span className="empty-icon">📋</span>
+                      <p style={{ color: 'var(--text-secondary)' }}>No se han registrado pedidos todavía.</p>
+                    </div>
+                  ) : (
+                    <div className="history-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '600px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                      {historialPedidos.map((ped) => (
+                        <div
+                          key={ped.id}
+                          className="history-list-item-btn"
+                          onClick={() => setComandaData({
+                            ticket: ped.id,
+                            cliente: ped.cliente_nombre,
+                            fecha_hora: ped.fecha_hora,
+                            productos: ped.productos.map(p => ({
+                              id: p.producto_id,
+                              nombre: p.nombre_producto,
+                              cantidad: p.cantidad,
+                              precio: parseFloat(p.precio_unitario)
+                            })),
+                            total: parseFloat(ped.total),
+                            atendido_por: ped.atendido_por,
+                            nota: ped.nota,
+                            tipo_entrega: ped.tipo_entrega
+                          })}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <span style={{ fontWeight: '700', color: 'var(--accent-primary)', fontSize: '1rem' }}>
+                              Ticket #{ped.id}
+                            </span>
+                            <span className="badge" style={{
+                              background: ped.tipo_entrega === 'Llevar' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                              border: ped.tipo_entrega === 'Llevar' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                              color: ped.tipo_entrega === 'Llevar' ? '#fca5a5' : '#a7f3d0',
+                              fontSize: '0.75rem',
+                              padding: '0.15rem 0.5rem'
+                            }}>
+                              {ped.tipo_entrega === 'Llevar' ? 'Llevar' : 'Servir'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                              {new Date(ped.fecha_hora).toLocaleDateString('es-CL')} - {new Date(ped.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>➔</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
@@ -1388,6 +1538,152 @@ function App() {
                 onClick={modalConfig.onConfirm}
               >
                 {modalConfig.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showPromptCliente && (
+        <div className="custom-modal-overlay">
+          <div className="custom-modal-card">
+            <form onSubmit={handleSubmitPedido}>
+              <div className="custom-modal-header">
+                <span className="custom-modal-icon">👤</span>
+                <h3 className="custom-modal-title">Confirmar Pedido</h3>
+              </div>
+              <div className="custom-modal-body">
+                <p className="custom-modal-message" style={{ marginBottom: '1rem' }}>
+                  Por favor, ingresa el nombre del cliente para este pedido:
+                </p>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Nombre del Cliente (Ej. Carlos Muñoz)"
+                    value={clienteNombre}
+                    onChange={(e) => setClienteNombre(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                </div>
+                <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Tipo de Entrega</label>
+                  <div className="delivery-selector-group">
+                    <button
+                      type="button"
+                      className={`delivery-option-btn ${tipoEntrega === 'Servir' ? 'active' : ''}`}
+                      onClick={() => setTipoEntrega('Servir')}
+                    >
+                      Para Servir
+                    </button>
+                    <button
+                      type="button"
+                      className={`delivery-option-btn ${tipoEntrega === 'Llevar' ? 'active' : ''}`}
+                      onClick={() => setTipoEntrega('Llevar')}
+                    >
+                      Para Llevar
+                    </button>
+                  </div>
+                </div>
+                <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.35rem' }}>Nota para la Cocina (Opcional)</label>
+                  <textarea
+                    className="form-input"
+                    placeholder="Ej. Sin cebolla, extra salsa, papas bien cocidas..."
+                    value={pedidoNota}
+                    onChange={(e) => setPedidoNota(e.target.value)}
+                    rows="2"
+                    style={{ resize: 'none', height: 'auto', paddingTop: '0.5rem', fontFamily: 'inherit' }}
+                  />
+                </div>
+              </div>
+              <div className="custom-modal-actions">
+                <button
+                  type="button"
+                  className="btn-secondary custom-modal-btn-cancel"
+                  onClick={() => setShowPromptCliente(false)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary custom-modal-btn-confirm"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {comandaData && (
+        <div className="custom-modal-overlay">
+          <div className="comanda-ticket-card">
+            {/* Cabecera del Ticket */}
+            <div className="comanda-header">
+              <h2 className="comanda-client-name">{comandaData.cliente}</h2>
+              <div className="comanda-local-name">Calibre 25</div>
+              <div className="comanda-ticket-number">Ticket N° {comandaData.ticket}</div>
+              <div style={{ marginTop: '0.5rem', fontWeight: 'bold', fontSize: '0.95rem', color: comandaData.tipo_entrega === 'Llevar' ? '#f87171' : '#34d399' }}>
+                {comandaData.tipo_entrega === 'Llevar' ? 'PARA LLEVAR' : 'PARA SERVIR'}
+              </div>
+              <div className="comanda-date-time">
+                <span>Fecha: {new Date(comandaData.fecha_hora).toLocaleDateString('es-CL')}</span>
+                <span>Hora: {new Date(comandaData.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+            </div>
+
+            {/* Listado de Productos como tabla */}
+            <div className="comanda-body">
+              <table className="comanda-table">
+                <thead>
+                  <tr>
+                    <th>Cant</th>
+                    <th>Producto</th>
+                    <th style={{ textAlign: 'right' }}>Precio</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comandaData.productos.map((prod, idx) => (
+                    <tr key={idx}>
+                      <td>{prod.cantidad}</td>
+                      <td>{prod.nombre}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        ${(parseFloat(prod.precio) * prod.cantidad).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pie del Ticket */}
+            <div className="comanda-footer">
+              {comandaData.nota && (
+                <div className="comanda-note" style={{ borderBottom: '1px dashed rgba(255, 255, 255, 0.1)', paddingBottom: '0.5rem', marginBottom: '0.5rem', fontStyle: 'italic', fontSize: '0.85rem', color: '#fda4af', textAlign: 'left' }}>
+                  Nota: "{comandaData.nota}"
+                </div>
+              )}
+              <div className="comanda-attendant">
+                Fue atendido por {comandaData.atendido_por}
+              </div>
+              <div className="comanda-total-row">
+                <span className="comanda-total-label">TOTAL:</span>
+                <span className="comanda-total-value">
+                  ${comandaData.total.toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                </span>
+              </div>
+            </div>
+
+            {/* Acción de Cerrar */}
+            <div className="comanda-actions">
+              <button
+                type="button"
+                className="btn-primary comanda-btn-close"
+                onClick={() => setComandaData(null)}
+              >
+                Cerrar Comanda
               </button>
             </div>
           </div>

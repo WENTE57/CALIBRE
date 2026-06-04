@@ -169,6 +169,32 @@ const setup = async () => {
     } else {
       console.log('✅ La tabla producto_ingredientes ya tiene registros.');
     }
+
+    console.log('Creando tabla de pedidos si no existe...');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pedidos (
+        id SERIAL PRIMARY KEY,
+        cliente_nombre VARCHAR(100) NOT NULL,
+        total DECIMAL(10, 2) NOT NULL,
+        fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        atendido_por VARCHAR(100) NOT NULL,
+        nota TEXT,
+        tipo_entrega VARCHAR(50) DEFAULT 'Servir'
+      );
+    `);
+
+    console.log('Creando tabla de pedido_productos si no existe...');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pedido_productos (
+        id SERIAL PRIMARY KEY,
+        pedido_id INTEGER REFERENCES pedidos(id) ON DELETE CASCADE,
+        producto_id INTEGER,
+        nombre_producto VARCHAR(150) NOT NULL,
+        cantidad INTEGER NOT NULL,
+        precio_unitario DECIMAL(10, 2) NOT NULL
+      );
+    `);
+    console.log('✅ Tablas de pedidos y pedido_productos creadas.');
   } catch (err) {
     console.error('❌ Error configurando la base de datos:', err);
   } finally {

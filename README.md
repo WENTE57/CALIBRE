@@ -1,6 +1,6 @@
 # 🍔 Calibre Desktop — Food System
 
-Este proyecto es una aplicación de escritorio nativa diseñada y desarrollada para administrar el sistema de un local de comida rápida. Está construida usando una arquitectura moderna integrada por **React (Vite)** para el frontend, **Node.js (Express)** para el servidor backend, **PostgreSQL** para la persistencia de datos y **Electron** como el entorno de ejecución de escritorio nativo.
+Este proyecto es una aplicación de escritorio nativa diseñada y desarrollada para administrar el sistema de un local de comida rápida. Está construida usando una arquitectura integrada por **React (Vite)** para el frontend, **Node.js (Express)** para el servidor backend, **PostgreSQL** para la persistencia de datos y **Electron** como el entorno de ejecución de escritorio nativo.
 
 La aplicación destaca por su diseño premium y oscuro estilo **Obsidian**, con gradients naranja/rojo y componentes de vidrio esmerilado (glassmorphism).
 
@@ -12,8 +12,12 @@ La aplicación destaca por su diseño premium y oscuro estilo **Obsidian**, con 
 *   **Gestión Dinámica de Categorías (CRUD):** Creación, edición y eliminación de categorías en tiempo real. La eliminación de categorías reasigna de manera segura los productos a la categoría por defecto (`Otros`).
 *   **Catálogo de Productos y Recetas:** Registro completo de productos con nombre, precio, emoji representativo, categoría e ingredientes asociados indicando la cantidad exacta requerida.
 *   **Inventario de Ingredientes:** Control del stock y almacenamiento de ingredientes de cocina individuales.
+*   **Registro de Pedidos (Comandas):** Flujo de venta que registra transaccionalmente el ticket en la base de datos vinculando múltiples productos, cantidades, el empleado que atiende y el total.
+*   **Descuento Automático de Stock:** Al registrar una venta, el backend calcula la receta de cada producto y descuenta automáticamente los ingredientes consumidos de la tabla de inventario.
+*   **Insignias de Entrega y Notas:** Soporte para elegir tipo de entrega (**Para Servir** / **Para Llevar**) mediante botones en recuadros modernos y agregar notas opcionales para cocina (ej. *"sin cebolla"*).
+*   **Comanda en Pantalla (Formato Ticket):** Visualización interactiva que simula un ticket de compra de impresora térmica detallando cliente, local ("Calibre 25"), número de ticket, fecha/hora, tabla de productos con subtotales, empleado, nota y el total.
+*   **Historial de Pedidos Simplificado:** Panel administrativo interactivo para listar todos los tickets registrados mostrando solo su número, fecha/hora y entrega. Al hacer clic sobre cualquier ticket se despliega la comanda detallada en pantalla.
 *   **Diálogos e Interfaces Modales Premium:** Sistema de alertas y confirmaciones integrado en React que sustituye por completo los diálogos nativos del sistema, solucionando los problemas de bloqueo de foco en el cliente de Electron en sistemas Windows.
-*   **Integración en un solo comando:** El entorno de desarrollo de Electron inicia automáticamente el servidor de desarrollo de Vite y el servidor de la API Express.
 
 ---
 
@@ -82,11 +86,11 @@ npm run db:setup
 ```
 
 Esto generará automáticamente:
-*   Las tablas `usuarios`, `categorias`, `productos`, `ingredientes` y `producto_ingredientes`.
+*   Las tablas `usuarios`, `categorias`, `productos`, `ingredientes`, `producto_ingredientes`, `pedidos` y `pedido_productos`.
 *   El **Usuario Administrador por defecto**:
     *   **Usuario:** `Juan Perez`
     *   **Contraseña:** `123456`
-*   Categorías iniciales (`General`, `Acompañamientos`, `Bebestibles`).
+*   Categorías iniciales (`General`, `Acompañamientos`, `Bebestibles`, `Otros`).
 *   Ingredientes semilla (Pan, Carne de Res, Queso Cheddar, etc.).
 *   Productos base (con sus ingredientes correspondientes asociados).
 
