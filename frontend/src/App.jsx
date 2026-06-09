@@ -109,7 +109,7 @@ function App() {
     setProductosLoading(true);
     setProductosError('');
     try {
-      const response = await fetch('http://localhost:5000/api/productos');
+      const response = await fetch('http://127.0.0.1:5000/api/productos');
       const data = await response.json();
       if (response.ok && data.success) {
         setProductos(data.productos);
@@ -128,7 +128,7 @@ function App() {
     setUsuariosLoading(true);
     setUsuariosError('');
     try {
-      const response = await fetch('http://localhost:5000/api/usuarios');
+      const response = await fetch('http://127.0.0.1:5000/api/usuarios');
       const data = await response.json();
       if (response.ok && data.success) {
         setUsuarios(data.usuarios);
@@ -145,7 +145,7 @@ function App() {
 
   const cargarIngredientes = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/ingredientes');
+      const response = await fetch('http://127.0.0.1:5000/api/ingredientes');
       const data = await response.json();
       if (response.ok && data.success) {
         setListaIngredientes(data.ingredientes);
@@ -192,7 +192,7 @@ function App() {
 
   const cargarCategorias = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/categorias');
+      const response = await fetch('http://127.0.0.1:5000/api/categorias');
       const data = await response.json();
       if (response.ok && data.success) {
         setListaCategorias(data.categorias);
@@ -215,7 +215,7 @@ function App() {
     setCatError('');
     setCatSuccess('');
     try {
-      const response = await fetch('http://localhost:5000/api/categorias', {
+      const response = await fetch('http://127.0.0.1:5000/api/categorias', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -264,7 +264,7 @@ function App() {
     setCatError('');
     setCatSuccess('');
     try {
-      const response = await fetch(`http://localhost:5000/api/categorias/${editandoCatId}`, {
+      const response = await fetch(`http://127.0.0.1:5000/api/categorias/${editandoCatId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -298,7 +298,7 @@ function App() {
         setCatError('');
         setCatSuccess('');
         try {
-          const response = await fetch(`http://localhost:5000/api/categorias/${catId}`, {
+          const response = await fetch(`http://127.0.0.1:5000/api/categorias/${catId}`, {
             method: 'DELETE',
           });
           const data = await response.json();
@@ -334,7 +334,7 @@ function App() {
       'Confirmar Eliminación',
       async () => {
         try {
-          const response = await fetch(`http://localhost:5000/api/usuarios/${userId}`, {
+          const response = await fetch(`http://127.0.0.1:5000/api/usuarios/${userId}`, {
             method: 'DELETE'
           });
           const data = await response.json();
@@ -371,7 +371,7 @@ function App() {
     setProdSuccess('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/productos', {
+      const response = await fetch('http://127.0.0.1:5000/api/productos', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -417,7 +417,7 @@ function App() {
       'Confirmar Eliminación',
       async () => {
         try {
-          const response = await fetch(`http://localhost:5000/api/productos/${productId}`, {
+          const response = await fetch(`http://127.0.0.1:5000/api/productos/${productId}`, {
             method: 'DELETE',
           });
           const data = await response.json();
@@ -462,7 +462,7 @@ function App() {
   }, [user, activeTab]);
 
   useEffect(() => {
-    if (user && activeTab === 'productos') {
+    if (user && (activeTab === 'productos' || activeTab === 'categorias')) {
       cargarIngredientes();
       cargarCategorias();
     }
@@ -477,7 +477,7 @@ function App() {
   const cargarHistorial = async () => {
     setLoadingHistorial(true);
     try {
-      const response = await fetch('http://localhost:5000/api/pedidos');
+      const response = await fetch('http://127.0.0.1:5000/api/pedidos');
       const data = await response.json();
       if (response.ok && data.success) {
         setHistorialPedidos(data.pedidos);
@@ -552,7 +552,7 @@ function App() {
     };
 
     try {
-      const response = await fetch('http://localhost:5000/api/pedidos', {
+      const response = await fetch('http://127.0.0.1:5000/api/pedidos', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -561,7 +561,7 @@ function App() {
       });
       const data = await response.json();
       if (response.ok && data.success) {
-        setComandaData({
+        const newComanda = {
           ticket: data.ticket,
           cliente: clienteNombre.trim(),
           fecha_hora: data.fecha_hora,
@@ -570,7 +570,14 @@ function App() {
           atendido_por: atendidoPor,
           nota: payload.nota,
           tipo_entrega: payload.tipo_entrega
-        });
+        };
+        setComandaData(newComanda);
+
+        // Imprimir automáticamente el ticket si estamos en Electron
+        if (window.electronAPI && typeof window.electronAPI.printTicket === 'function') {
+          window.electronAPI.printTicket(newComanda);
+        }
+
         setPedido([]);
         setClienteNombre('');
         setPedidoNota('');
@@ -597,7 +604,7 @@ function App() {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/login', {
+      const response = await fetch('http://127.0.0.1:5000/api/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -674,7 +681,7 @@ function App() {
     setRegSuccess('');
 
     try {
-      const response = await fetch('http://localhost:5000/api/usuarios', {
+      const response = await fetch('http://127.0.0.1:5000/api/usuarios', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -806,35 +813,43 @@ function App() {
                 </div>
               </div>
 
-              {/* Navegación para Administrador */}
-              {user.cargo.toLowerCase() === 'administrador' && (
-                <div className="nav-tabs">
-                  <button 
-                    onClick={() => setActiveTab('pedidos')} 
-                    className={`nav-tab ${activeTab === 'pedidos' ? 'active' : ''}`}
-                  >
-                    🛒 Pedidos
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('usuarios')} 
-                    className={`nav-tab ${activeTab === 'usuarios' ? 'active' : ''}`}
-                  >
-                    👥 Usuarios
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('productos')} 
-                    className={`nav-tab ${activeTab === 'productos' ? 'active' : ''}`}
-                  >
-                    📦 Productos
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('historial')} 
-                    className={`nav-tab ${activeTab === 'historial' ? 'active' : ''}`}
-                  >
-                    📋 Historial
-                  </button>
-                </div>
-              )}
+              {/* Navegación según el rol del usuario */}
+              <div className="nav-tabs">
+                <button 
+                  onClick={() => setActiveTab('pedidos')} 
+                  className={`nav-tab ${activeTab === 'pedidos' ? 'active' : ''}`}
+                >
+                  🛒 Pedidos
+                </button>
+                {user.cargo.toLowerCase() === 'administrador' && (
+                  <>
+                    <button 
+                      onClick={() => setActiveTab('usuarios')} 
+                      className={`nav-tab ${activeTab === 'usuarios' ? 'active' : ''}`}
+                    >
+                      👥 Usuarios
+                    </button>
+                    <button 
+                      onClick={() => setActiveTab('productos')} 
+                      className={`nav-tab ${activeTab === 'productos' ? 'active' : ''}`}
+                    >
+                      📦 Productos
+                    </button>
+                    <button 
+                      onClick={() => setActiveTab('categorias')} 
+                      className={`nav-tab ${activeTab === 'categorias' ? 'active' : ''}`}
+                    >
+                      🏷️ Categorías
+                    </button>
+                  </>
+                )}
+                <button 
+                  onClick={() => setActiveTab('historial')} 
+                  className={`nav-tab ${activeTab === 'historial' ? 'active' : ''}`}
+                >
+                  📋 Historial
+                </button>
+              </div>
 
               <button onClick={handleLogout} className="btn-secondary">
                 Cerrar Sesión
@@ -1232,86 +1247,7 @@ function App() {
                         </div>
                       </div>
 
-                      {/* Crear / Editar Categoría */}
-                      <div className="form-group">
-                        <label className="form-label">
-                          {editandoCatId ? '✏️ Editar Categoría' : 'Crear Nueva Categoría'}
-                        </label>
-                        <div className="ingredients-selector-row">
-                          <input
-                            type="text"
-                            className="form-input"
-                            style={{ paddingLeft: '1rem' }}
-                            placeholder="Ej. Postres"
-                            value={nuevaCategoriaNombre}
-                            onChange={(e) => setNuevaCategoriaNombre(e.target.value)}
-                            disabled={prodLoading}
-                          />
-                          {editandoCatId ? (
-                            <div style={{ display: 'flex', gap: '0.25rem', flex: 1.5 }}>
-                              <button
-                                type="button"
-                                onClick={handleUpdateCategory}
-                                className="btn-primary"
-                                style={{ flex: 1, padding: '0.6rem 0', fontSize: '0.85rem' }}
-                              >
-                                Guardar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelarEdicionCat}
-                                className="btn-secondary"
-                                style={{ flex: 1, padding: '0.6rem 0', fontSize: '0.85rem' }}
-                              >
-                                Cancelar
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={handleCreateCategory}
-                              className="btn-secondary btn-add-ingredient"
-                              disabled={prodLoading}
-                            >
-                              + Crear
-                            </button>
-                          )}
-                        </div>
-                        {catError && <p className="cat-error-msg">{catError}</p>}
-                        {catSuccess && <p className="cat-success-msg">{catSuccess}</p>}
 
-                        {/* Listado de categorías registradas */}
-                        {listaCategorias.length > 0 && (
-                          <div className="admin-categories-list-container">
-                            <span className="selected-title">Categorías Registradas:</span>
-                            <div className="admin-categories-mini-list">
-                              {listaCategorias.map((cat) => (
-                                <div key={cat.id} className="admin-category-item">
-                                  <span className="admin-category-item-name">{cat.nombre}</span>
-                                  <div className="admin-category-item-actions">
-                                    <button
-                                      type="button"
-                                      onClick={() => iniciarEdicionCat(cat)}
-                                      className="btn-edit-cat-icon"
-                                      title="Editar categoría"
-                                    >
-                                      ✏️
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteCategory(cat.id, cat.nombre)}
-                                      className="btn-delete-cat-icon"
-                                      title="Eliminar categoría"
-                                    >
-                                      🗑️
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
 
                       <div className="form-group">
                         <label className="form-label">Ingredientes del Producto</label>
@@ -1441,7 +1377,130 @@ function App() {
               </div>
             )}
 
-            {activeTab === 'historial' && user.cargo.toLowerCase() === 'administrador' && (
+            {/* PESTAÑA DE CATEGORÍAS (Solo Admin) */}
+            {activeTab === 'categorias' && user.cargo.toLowerCase() === 'administrador' && (
+              <div className="admin-tab-content animate-fade">
+                <div className="admin-grid-layout">
+                  {/* Formulario de creación/edición */}
+                  <div className="admin-section">
+                    <h3 className="section-title">🏷️ Registrar Categoría</h3>
+                    <p className="section-subtitle">Crea, edita o elimina las categorías del catálogo</p>
+                    
+                    {catError && (
+                      <div className="alert alert-error">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10"></circle>
+                          <line x1="12" y1="8" x2="12" y2="12"></line>
+                          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                        <span>{catError}</span>
+                      </div>
+                    )}
+                    {catSuccess && (
+                      <div className="alert alert-success">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        <span>{catSuccess}</span>
+                      </div>
+                    )}
+
+                    <form onSubmit={(e) => e.preventDefault()} className="admin-form">
+                      <div className="form-group">
+                        <label className="form-label" htmlFor="nuevaCategoriaNombre">
+                          {editandoCatId ? '✏️ Editar Nombre de Categoría' : 'Nombre de la Categoría'}
+                        </label>
+                        <div className="input-wrapper">
+                          <input
+                            type="text"
+                            id="nuevaCategoriaNombre"
+                            className="form-input"
+                            style={{ paddingLeft: '2.5rem' }}
+                            placeholder="Ej. Postres"
+                            value={nuevaCategoriaNombre}
+                            onChange={(e) => setNuevaCategoriaNombre(e.target.value)}
+                          />
+                          <span className="input-icon">🏷️</span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+                        {editandoCatId ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleUpdateCategory}
+                              className="btn-primary"
+                              style={{ flex: 1 }}
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelarEdicionCat}
+                              className="btn-secondary"
+                              style={{ flex: 1 }}
+                            >
+                              Cancelar
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleCreateCategory}
+                            className="btn-primary"
+                            style={{ width: '100%' }}
+                          >
+                            Crear Categoría
+                          </button>
+                        )}
+                      </div>
+                    </form>
+                  </div>
+
+                  {/* Listado de categorías */}
+                  <div className="admin-section">
+                    <h3 className="section-title">📋 Categorías Registradas</h3>
+                    <p className="section-subtitle">Lista de categorías disponibles para clasificar productos</p>
+
+                    {listaCategorias.length === 0 ? (
+                      <p className="empty-catalog" style={{ marginTop: '1rem' }}>No hay categorías registradas.</p>
+                    ) : (
+                      <div className="admin-categories-mini-list" style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {listaCategorias.map((cat) => (
+                          <div key={cat.id} className="admin-category-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 'var(--radius-md)' }}>
+                            <span className="admin-category-item-name" style={{ fontWeight: '500', color: 'var(--text-primary)' }}>{cat.nombre}</span>
+                            <div className="admin-category-item-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                              <button
+                                type="button"
+                                onClick={() => iniciarEdicionCat(cat)}
+                                className="btn-edit-cat-icon"
+                                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: 'var(--radius-sm)' }}
+                                title="Editar categoría"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCategory(cat.id, cat.nombre)}
+                                className="btn-delete-cat-icon"
+                                style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: 'var(--radius-sm)' }}
+                                title="Eliminar categoría"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'historial' && (
               <div className="admin-container animate-fade-in" style={{ width: '100%' }}>
                 <div className="admin-card full-width">
                   <div className="admin-card-header">
@@ -1677,10 +1736,21 @@ function App() {
             </div>
 
             {/* Acción de Cerrar */}
-            <div className="comanda-actions">
+            <div className="comanda-actions" style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+              {window.electronAPI && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                  onClick={() => window.electronAPI.printTicket(comandaData)}
+                >
+                  🖨️ Reimprimir Ticket
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-primary comanda-btn-close"
+                style={{ flex: 1 }}
                 onClick={() => setComandaData(null)}
               >
                 Cerrar Comanda

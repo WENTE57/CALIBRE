@@ -88,7 +88,7 @@ const setup = async () => {
       CREATE TABLE IF NOT EXISTS ingredientes (
         id SERIAL PRIMARY KEY,
         nombre VARCHAR(100) UNIQUE NOT NULL,
-        stock INTEGER DEFAULT 0
+        stock DECIMAL(10, 2) DEFAULT 0.00
       );
     `);
 

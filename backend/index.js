@@ -52,6 +52,17 @@ app.use(express.json()); // Permite procesar peticiones JSON
       )
     `);
     console.log("✅ Tabla 'pedido_productos' asegurada.");
+
+    // 5. Asegurar tipo decimal para stock en ingredientes
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ingredientes') THEN
+          ALTER TABLE ingredientes ALTER COLUMN stock TYPE DECIMAL(10, 2);
+        END IF;
+      END $$;
+    `);
+    console.log("✅ Columna 'stock' en la tabla ingredientes asegurada como DECIMAL.");
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
