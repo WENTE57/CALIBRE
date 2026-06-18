@@ -2,7 +2,7 @@
 
 Este proyecto es una aplicación de escritorio nativa diseñada y desarrollada para administrar el sistema de un local de comida rápida. Está construida usando una arquitectura integrada por **React (Vite)** para el frontend, **Node.js (Express)** para el servidor backend, **PostgreSQL** para la persistencia de datos y **Electron** como el entorno de ejecución de escritorio nativo.
 
-La aplicación destaca por su diseño premium y oscuro estilo **Obsidian**, con gradients naranja/rojo y componentes de vidrio esmerilado (glassmorphism).
+La aplicación destaca por su diseño premium y adaptable, que incluye soporte tanto para un tema claro (con tonos cálidos y elegantes) como para un tema oscuro (estilo Obsidian, con tonos café y acentos naranjas), los cuales pueden alternarse en tiempo real mediante un interruptor de tema flotante de alta fidelidad visual.
 
 ---
 
