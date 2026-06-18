@@ -179,7 +179,8 @@ const setup = async () => {
         fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         atendido_por VARCHAR(100) NOT NULL,
         nota TEXT,
-        tipo_entrega VARCHAR(50) DEFAULT 'Servir'
+        tipo_entrega VARCHAR(50) DEFAULT 'Servir',
+        tipo_transaccion VARCHAR(50) DEFAULT 'Efectivo'
       );
     `);
 

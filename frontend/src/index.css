@@ -2,18 +2,86 @@
 
 :root {
   --font-primary: 'Inter', system-ui, sans-serif;
+  
+  /* Gradiente y fondo */
+  --bg-gradient: linear-gradient(135deg, #f7f4eb 0%, #e8e3d5 100%);
+  
+  /* Colores de acento */
+  --accent-primary: #ea580c; /* Naranja Hermès premium */
+  --accent-primary-hover: #c2410c; /* Naranja más oscuro */
+  --accent-glow: rgba(234, 88, 12, 0.2);
+  
+  /* Glassmorphism claro y cálido */
+  --glass-bg: rgba(237, 191, 116, 0.88); /* #edbf74 semi-opaco */
+  --glass-border: rgba(87, 56, 35, 0.12); /* Borde cacao medio */
+  --card-shadow: 0 15px 45px rgba(87, 56, 35, 0.08);
+  
+  /* Textos elegantes oscuros (Café Cacao / Bronce) */
+  --text-primary: #2a1708; /* Espresso profundo */
+  --text-secondary: #553316; /* Marrón cálido medio */
+  --text-muted: #82532b; /* Bronce/Arena apagado */
+  
+  /* Estados */
+  --success: #059669; /* Verde más oscuro para contraste en fondo claro */
+  --error: #dc2626; /* Rojo más oscuro para contraste */
+
+  /* Variables semánticas para componentes (usando tonos claros translúcidos sobre la tarjeta dorada) */
+  --item-bg: rgba(255, 255, 255, 0.35);
+  --item-bg-hover: rgba(255, 255, 255, 0.65);
+  --input-bg: rgba(255, 255, 255, 0.5);
+  --input-focus-bg: #ffffff;
+  --btn-secondary-bg: rgba(255, 255, 255, 0.3);
+  --btn-secondary-hover-bg: rgba(255, 255, 255, 0.65);
+  
+  /* Estilos del ticket de comanda (muy oscuros y legibles en negrita) */
+  --ticket-bg: var(--glass-bg);
+  --ticket-text: #050302; /* Casi negro sólido */
+  --ticket-text-secondary: #1a0f08; /* Café cacao oscuro */
+  --ticket-text-muted: #3a2211; /* Café medio oscuro */
+  --ticket-border: rgba(26, 15, 8, 0.75); /* Borde café oscuro más visible y nítido */
+  --ticket-total: #b91c1c; /* Rojo de ticket clásico para el total */
+  --ticket-shadow: var(--card-shadow);
+}
+
+body.dark-theme {
+  /* Gradiente y fondo */
   --bg-gradient: linear-gradient(135deg, #180c05 0%, #0c0502 50%, #180c05 100%);
+  
+  /* Colores de acento */
   --accent-primary: #f97316; /* Naranja cálido */
   --accent-primary-hover: #ea580c; /* Naranja más oscuro */
   --accent-glow: rgba(249, 115, 22, 0.3);
+  
+  /* Glassmorphism oscuro y cálido */
   --glass-bg: rgba(30, 15, 8, 0.45);
   --glass-border: rgba(255, 255, 255, 0.08);
+  --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+  
+  /* Textos elegantes claros */
   --text-primary: #fffbeb; /* Blanco crema cálido */
   --text-secondary: #fed7aa; /* Durazno suave */
   --text-muted: #a16207; /* Amarillo oscuro / dorado */
+  
+  /* Estados */
   --success: #10b981;
   --error: #ef4444;
-  --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+
+  /* Variables semánticas para componentes */
+  --item-bg: rgba(255, 255, 255, 0.05);
+  --item-bg-hover: rgba(255, 255, 255, 0.12);
+  --input-bg: rgba(0, 0, 0, 0.3);
+  --input-focus-bg: rgba(0, 0, 0, 0.55);
+  --btn-secondary-bg: rgba(255, 255, 255, 0.08);
+  --btn-secondary-hover-bg: rgba(255, 255, 255, 0.18);
+  
+  /* Estilos del ticket de comanda (se queda claro para mantener el estilo de ticket físico realista) */
+  --ticket-bg: #fffbeb;
+  --ticket-text: #050302;
+  --ticket-text-secondary: #1a0f08;
+  --ticket-text-muted: #3a2211;
+  --ticket-border: rgba(26, 15, 8, 0.75);
+  --ticket-total: #b91c1c;
+  --ticket-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -27,8 +95,9 @@ body {
   background: var(--bg-gradient);
   background-attachment: fixed;
   color: var(--text-primary);
-  min-height: 100vh;
-  overflow-x: hidden;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -37,7 +106,8 @@ body {
 
 #root {
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;

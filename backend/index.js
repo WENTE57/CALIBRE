@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const pool = require('./db');
+const XLSX = require('xlsx');
 require('dotenv').config();
 
 const app = express();
@@ -38,7 +39,8 @@ app.use(express.json()); // Permite procesar peticiones JSON
     `);
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nota TEXT");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_entrega VARCHAR(50) DEFAULT 'Servir'");
-    console.log("✅ Tabla 'pedidos' asegurada (con columnas 'nota' y 'tipo_entrega').");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_transaccion VARCHAR(50) DEFAULT 'Efectivo'");
+    console.log("✅ Tabla 'pedidos' asegurada (con columnas 'nota', 'tipo_entrega' y 'tipo_transaccion').");
 
     // 4. Asegurar tabla pedido_productos
     await pool.query(`
@@ -548,7 +550,7 @@ app.delete('/api/categorias/:id', async (req, res) => {
 
 // Endpoint de Registrar Pedido
 app.post('/api/pedidos', async (req, res) => {
-  const { cliente_nombre, total, atendido_por, productos, nota, tipo_entrega } = req.body;
+  const { cliente_nombre, total, atendido_por, productos, nota, tipo_entrega, tipo_transaccion } = req.body;
 
   if (!cliente_nombre || !total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
     return res.status(400).json({
@@ -563,8 +565,8 @@ app.post('/api/pedidos', async (req, res) => {
 
     // 1. Insertar la cabecera del pedido
     const orderRes = await client.query(
-      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega) VALUES ($1, $2, $3, $4, $5) RETURNING id, fecha_hora',
-      [cliente_nombre.trim(), total, atendido_por.trim(), nota ? nota.trim() : null, tipo_entrega || 'Servir']
+      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, fecha_hora',
+      [cliente_nombre.trim(), total, atendido_por.trim(), nota ? nota.trim() : null, tipo_entrega || 'Servir', tipo_transaccion || 'Efectivo']
     );
     const pedidoId = orderRes.rows[0].id;
     const fechaHora = orderRes.rows[0].fecha_hora;
@@ -616,7 +618,7 @@ app.post('/api/pedidos', async (req, res) => {
 app.get('/api/pedidos', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT p.id, p.cliente_nombre, p.total, p.fecha_hora, p.atendido_por, p.nota, p.tipo_entrega,
+      SELECT p.id, p.cliente_nombre, p.total, p.fecha_hora, p.atendido_por, p.nota, p.tipo_entrega, p.tipo_transaccion,
              COALESCE(
                json_agg(
                  json_build_object(
@@ -644,6 +646,114 @@ app.get('/api/pedidos', async (req, res) => {
       success: false,
       message: 'Error al obtener el historial de pedidos.'
     });
+  }
+});
+
+// Endpoint de Cierre de Caja del Día
+app.get('/api/informes/cierre', async (req, res) => {
+  const { fecha } = req.query; // YYYY-MM-DD
+  if (!fecha) {
+    return res.status(400).json({ success: false, message: 'La fecha es requerida.' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT 
+        COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+        MIN(id) as ticket_inicio,
+        MAX(id) as ticket_fin,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total ELSE 0 END), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Débito' THEN total ELSE 0 END), 0)::FLOAT as total_debito,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Crédito' THEN total ELSE 0 END), 0)::FLOAT as total_credito
+      FROM pedidos
+      WHERE DATE(fecha_hora) = $1
+    `, [fecha]);
+
+    const row = result.rows[0];
+    const total_ventas = row.total_ventas;
+    const ticket_inicio = row.ticket_inicio;
+    const ticket_fin = row.ticket_fin;
+    const total_efectivo = row.total_efectivo;
+    const total_debito = row.total_debito;
+    const total_credito = row.total_credito;
+    const total_tarjeta = total_debito + total_credito;
+
+    res.json({
+      success: true,
+      data: {
+        fecha,
+        total_ventas,
+        ticket_inicio,
+        ticket_fin,
+        total_efectivo,
+        total_debito,
+        total_credito,
+        total_tarjeta
+      }
+    });
+  } catch (err) {
+    console.error('Error en GET /api/informes/cierre:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener el informe de cierre.' });
+  }
+});
+
+// Endpoint de Exportar Resumen Mensual a Excel
+app.get('/api/informes/excel', async (req, res) => {
+  const { mes } = req.query; // YYYY-MM
+  if (!mes) {
+    return res.status(400).json({ success: false, message: 'El mes (YYYY-MM) es requerido.' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT 
+        TO_CHAR(fecha_hora, 'YYYY-MM-DD') as fecha,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total ELSE 0 END), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total ELSE 0 END), 0)::FLOAT as total_tarjeta,
+        COALESCE(SUM(total), 0)::FLOAT as total_ventas
+      FROM pedidos
+      WHERE TO_CHAR(fecha_hora, 'YYYY-MM') = $1
+      GROUP BY TO_CHAR(fecha_hora, 'YYYY-MM-DD')
+      ORDER BY TO_CHAR(fecha_hora, 'YYYY-MM-DD') ASC
+    `, [mes]);
+
+    // Crear filas del reporte
+    const rows = result.rows.map(r => ({
+      'Fecha': r.fecha,
+      'Ventas Efectivo ($)': r.total_efectivo,
+      'Ventas Tarjeta ($)': r.total_tarjeta,
+      'Total Ventas ($)': r.total_ventas
+    }));
+
+    // Si no hay ventas, añadir una fila informativa
+    if (rows.length === 0) {
+      rows.push({
+        'Fecha': 'Sin ventas en este mes',
+        'Ventas Efectivo ($)': 0,
+        'Ventas Tarjeta ($)': 0,
+        'Total Ventas ($)': 0
+      });
+    }
+
+    // Generar Workbook con xlsx
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `Ventas ${mes}`);
+
+    // Configurar el ancho de las columnas
+    const max_width = [15, 20, 20, 20];
+    ws['!cols'] = max_width.map(w => ({ wch: w }));
+
+    // Escribir el buffer
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Resumen-Ventas-${mes}.xlsx`);
+    res.end(buf);
+
+  } catch (err) {
+    console.error('Error en GET /api/informes/excel:', err.message);
+    res.status(500).json({ success: false, message: 'Error al generar el archivo Excel.' });
   }
 });
 

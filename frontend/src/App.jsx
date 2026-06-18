@@ -1,12 +1,24 @@
 import { useState, useEffect } from 'react';
 import './App.css';
+import logoImg from './assets/logo.png';
 
 function App() {
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('calibre_theme') === 'dark');
   const [nombre, setNombre] = useState('');
   const [contrasena, setContrasena] = useState('');
   const [user, setUser] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isDark) {
+      document.body.classList.add('dark-theme');
+      localStorage.setItem('calibre_theme', 'dark');
+    } else {
+      document.body.classList.remove('dark-theme');
+      localStorage.setItem('calibre_theme', 'light');
+    }
+  }, [isDark]);
 
   // Estados para creación de usuario
   const [regNombre, setRegNombre] = useState('');
@@ -27,6 +39,7 @@ function App() {
   const [clienteNombre, setClienteNombre] = useState('');
   const [pedidoNota, setPedidoNota] = useState('');
   const [tipoEntrega, setTipoEntrega] = useState('Servir');
+  const [tipoTransaccion, setTipoTransaccion] = useState('Efectivo'); // 'Efectivo' o 'Crédito'
   const [comandaData, setComandaData] = useState(null);
   const [historialPedidos, setHistorialPedidos] = useState([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
@@ -59,6 +72,30 @@ function App() {
   const [catSuccess, setCatSuccess] = useState('');
   const [catError, setCatError] = useState('');
   const [editandoCatId, setEditandoCatId] = useState(null);
+
+  // Estados para búsqueda en historial
+  const [filtroTicketId, setFiltroTicketId] = useState('');
+  const [filtroCliente, setFiltroCliente] = useState('');
+  const [filtroFechaInicio, setFiltroFechaInicio] = useState('');
+  const [filtroFechaFin, setFiltroFechaFin] = useState('');
+
+  // Estados para Cierre de Caja
+  const [fechaCierre, setFechaCierre] = useState(() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  });
+  const [mesExcel, setMesExcel] = useState(() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  });
+  const [cierreData, setCierreData] = useState(null);
+  const [loadingCierre, setLoadingCierre] = useState(false);
+  const [errorCierre, setErrorCierre] = useState('');
 
   // Estado para alertas y confirmaciones personalizadas (reemplaza alert/confirm nativos de Electron)
   const [modalConfig, setModalConfig] = useState({
@@ -468,6 +505,38 @@ function App() {
     }
   }, [user, activeTab]);
 
+  const cargarCierreCaja = async (dateStr) => {
+    const targetDate = dateStr || fechaCierre;
+    if (!targetDate) return;
+    setLoadingCierre(true);
+    setErrorCierre('');
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/informes/cierre?fecha=${targetDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setCierreData(data.data);
+      } else {
+        setErrorCierre(data.message || 'Error al cargar el cierre de caja.');
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorCierre('No se pudo conectar al servidor para obtener el cierre de caja.');
+    } finally {
+      setLoadingCierre(false);
+    }
+  };
+
+  const descargarExcelMensual = () => {
+    if (!mesExcel) return;
+    window.open(`http://127.0.0.1:5000/api/informes/excel?mes=${mesExcel}`);
+  };
+
+  useEffect(() => {
+    if (user && activeTab === 'cierre') {
+      cargarCierreCaja();
+    }
+  }, [user, activeTab, fechaCierre]);
+
   useEffect(() => {
     if (user && activeTab === 'historial') {
       cargarHistorial();
@@ -524,6 +593,7 @@ function App() {
     setClienteNombre('');
     setPedidoNota('');
     setTipoEntrega('Servir');
+    setTipoTransaccion('Efectivo');
     setShowPromptCliente(true);
   };
 
@@ -548,7 +618,8 @@ function App() {
         precio: parseFloat(item.precio)
       })),
       nota: pedidoNota.trim() || null,
-      tipo_entrega: tipoEntrega
+      tipo_entrega: tipoEntrega,
+      tipo_transaccion: tipoTransaccion
     };
 
     try {
@@ -569,7 +640,8 @@ function App() {
           total: totalPedido,
           atendido_por: atendidoPor,
           nota: payload.nota,
-          tipo_entrega: payload.tipo_entrega
+          tipo_entrega: payload.tipo_entrega,
+          tipo_transaccion: payload.tipo_transaccion
         };
         setComandaData(newComanda);
 
@@ -666,6 +738,7 @@ function App() {
     setCatSuccess('');
     setCatError('');
     setEditandoCatId(null);
+    setTipoTransaccion('Efectivo');
   };
 
   const handleRegisterUser = async (e) => {
@@ -726,8 +799,7 @@ function App() {
           /* Formulario de Login */
           <div className="glass-card">
             <div className="card-header">
-              <span className="logo-icon">🍔</span>
-              <h1 className="card-title">Calibre</h1>
+              <img src={logoImg} alt="Calibre 25" className="logo-image" />
               <p className="card-subtitle">Inicia sesión para acceder al sistema</p>
             </div>
 
@@ -848,6 +920,12 @@ function App() {
                   className={`nav-tab ${activeTab === 'historial' ? 'active' : ''}`}
                 >
                   📋 Historial
+                </button>
+                <button 
+                  onClick={() => setActiveTab('cierre')} 
+                  className={`nav-tab ${activeTab === 'cierre' ? 'active' : ''}`}
+                >
+                  📊 Cierre
                 </button>
               </div>
 
@@ -1501,13 +1579,76 @@ function App() {
             )}
 
             {activeTab === 'historial' && (
-              <div className="admin-container animate-fade-in" style={{ width: '100%' }}>
-                <div className="admin-card full-width">
+              <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <div className="admin-card-header">
                     <h3 className="section-title">📋 Historial de Pedidos (Tickets)</h3>
                     <p className="section-subtitle">Visualiza todas las comandas y tickets registrados en el sistema</p>
                   </div>
                   
+                  {/* Buscador y Filtros */}
+                  <div className="history-filters" style={{ display: 'flex', gap: '1rem', padding: '0.75rem 1rem', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '12px', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <div style={{ flex: '1 1 100px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>N° Ticket</label>
+                      <input
+                        type="text"
+                        placeholder="Buscar N°..."
+                        className="form-input"
+                        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', height: '38px' }}
+                        value={filtroTicketId}
+                        onChange={(e) => setFiltroTicketId(e.target.value)}
+                      />
+                    </div>
+                    <div style={{ flex: '2 1 180px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Nombre de Cliente</label>
+                      <input
+                        type="text"
+                        placeholder="Buscar cliente..."
+                        className="form-input"
+                        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', height: '38px' }}
+                        value={filtroCliente}
+                        onChange={(e) => setFiltroCliente(e.target.value)}
+                      />
+                    </div>
+                    <div style={{ flex: '1.5 1 140px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Fecha Inicio</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', height: '38px', color: 'var(--text-primary)' }}
+                        value={filtroFechaInicio}
+                        onChange={(e) => setFiltroFechaInicio(e.target.value)}
+                      />
+                    </div>
+                    <div style={{ flex: '1.5 1 140px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Fecha Fin</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', height: '38px', color: 'var(--text-primary)' }}
+                        value={filtroFechaFin}
+                        onChange={(e) => setFiltroFechaFin(e.target.value)}
+                      />
+                    </div>
+                    {(filtroTicketId || filtroCliente || filtroFechaInicio || filtroFechaFin) && (
+                      <div style={{ display: 'flex' }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ height: '38px', padding: '0.5rem 1rem', fontSize: '0.85rem', whiteSpace: 'nowrap' }}
+                          onClick={() => {
+                            setFiltroTicketId('');
+                            setFiltroCliente('');
+                            setFiltroFechaInicio('');
+                            setFiltroFechaFin('');
+                          }}
+                        >
+                          Limpiar Filtros
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   {loadingHistorial ? (
                     <div className="loading-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem' }}>
                       <div className="spinner"></div>
@@ -1519,54 +1660,234 @@ function App() {
                       <p style={{ color: 'var(--text-secondary)' }}>No se han registrado pedidos todavía.</p>
                     </div>
                   ) : (
-                    <div className="history-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '600px', overflowY: 'auto', paddingRight: '0.5rem' }}>
-                      {historialPedidos.map((ped) => (
-                        <div
-                          key={ped.id}
-                          className="history-list-item-btn"
-                          onClick={() => setComandaData({
-                            ticket: ped.id,
-                            cliente: ped.cliente_nombre,
-                            fecha_hora: ped.fecha_hora,
-                            productos: ped.productos.map(p => ({
-                              id: p.producto_id,
-                              nombre: p.nombre_producto,
-                              cantidad: p.cantidad,
-                              precio: parseFloat(p.precio_unitario)
-                            })),
-                            total: parseFloat(ped.total),
-                            atendido_por: ped.atendido_por,
-                            nota: ped.nota,
-                            tipo_entrega: ped.tipo_entrega
-                          })}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                            <span style={{ fontWeight: '700', color: 'var(--accent-primary)', fontSize: '1rem' }}>
-                              Ticket #{ped.id}
-                            </span>
-                            <span className="badge" style={{
-                              background: ped.tipo_entrega === 'Llevar' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                              border: ped.tipo_entrega === 'Llevar' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
-                              color: ped.tipo_entrega === 'Llevar' ? '#fca5a5' : '#a7f3d0',
-                              fontSize: '0.75rem',
-                              padding: '0.15rem 0.5rem'
-                            }}>
-                              {ped.tipo_entrega === 'Llevar' ? 'Llevar' : 'Servir'}
-                            </span>
+                    (() => {
+                      const pedidosFiltrados = historialPedidos.filter((ped) => {
+                        if (filtroTicketId && !ped.id.toString().includes(filtroTicketId.trim())) {
+                          return false;
+                        }
+                        if (filtroCliente && !ped.cliente_nombre.toLowerCase().includes(filtroCliente.toLowerCase().trim())) {
+                          return false;
+                        }
+                        
+                        // Obtener fecha del ticket en formato local YYYY-MM-DD
+                        const dateObj = new Date(ped.fecha_hora);
+                        const year = dateObj.getFullYear();
+                        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                        const day = String(dateObj.getDate()).padStart(2, '0');
+                        const fechaPedLocal = `${year}-${month}-${day}`;
+
+                        if (filtroFechaInicio && fechaPedLocal < filtroFechaInicio) {
+                          return false;
+                        }
+                        if (filtroFechaFin && fechaPedLocal > filtroFechaFin) {
+                          return false;
+                        }
+                        return true;
+                      });
+
+                      if (pedidosFiltrados.length === 0) {
+                        return (
+                          <div className="empty-order" style={{ minHeight: '200px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                            <span className="empty-icon">🔍</span>
+                            <p style={{ color: 'var(--text-secondary)' }}>No se encontraron tickets con los filtros especificados.</p>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                              {new Date(ped.fecha_hora).toLocaleDateString('es-CL')} - {new Date(ped.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>➔</span>
-                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="history-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1, overflowY: 'auto', paddingRight: '0.5rem' }}>
+                          {pedidosFiltrados.map((ped) => (
+                            <div
+                              key={ped.id}
+                              className="history-list-item-btn"
+                              onClick={() => setComandaData({
+                                ticket: ped.id,
+                                cliente: ped.cliente_nombre,
+                                fecha_hora: ped.fecha_hora,
+                                productos: ped.productos.map(p => ({
+                                  id: p.producto_id,
+                                  nombre: p.nombre_producto,
+                                  cantidad: p.cantidad,
+                                  precio: parseFloat(p.precio_unitario)
+                                })),
+                                total: parseFloat(ped.total),
+                                atendido_por: ped.atendido_por,
+                                nota: ped.nota,
+                                tipo_entrega: ped.tipo_entrega,
+                                tipo_transaccion: ped.tipo_transaccion
+                              })}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <span style={{ fontWeight: '700', color: 'var(--accent-primary)', fontSize: '1rem' }}>
+                                  Ticket #{ped.id}
+                                </span>
+                                <span className="badge" style={{
+                                  background: ped.tipo_entrega === 'Llevar' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                  border: ped.tipo_entrega === 'Llevar' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
+                                  color: ped.tipo_entrega === 'Llevar' ? '#fca5a5' : '#a7f3d0',
+                                  fontSize: '0.75rem',
+                                  padding: '0.15rem 0.5rem'
+                                }}>
+                                  {ped.tipo_entrega === 'Llevar' ? 'Llevar' : 'Servir'}
+                                </span>
+                                <span className="badge" style={{
+                                  background: ped.tipo_transaccion === 'Crédito' 
+                                    ? 'rgba(59, 130, 246, 0.15)' 
+                                    : ped.tipo_transaccion === 'Débito' 
+                                      ? 'rgba(16, 185, 129, 0.15)' 
+                                      : 'rgba(234, 179, 8, 0.15)',
+                                  border: ped.tipo_transaccion === 'Crédito' 
+                                    ? '1px solid rgba(59, 130, 246, 0.3)' 
+                                    : ped.tipo_transaccion === 'Débito' 
+                                      ? '1px solid rgba(16, 185, 129, 0.3)' 
+                                      : '1px solid rgba(234, 179, 8, 0.3)',
+                                  color: ped.tipo_transaccion === 'Crédito' 
+                                    ? '#93c5fd' 
+                                    : ped.tipo_transaccion === 'Débito' 
+                                      ? '#a7f3d0' 
+                                      : '#fef08a',
+                                  fontSize: '0.75rem',
+                                  padding: '0.15rem 0.5rem'
+                                }}>
+                                  {ped.tipo_transaccion || 'Efectivo'}
+                                </span>
+                                <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: '600' }}>
+                                  - {ped.cliente_nombre}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                  {new Date(ped.fecha_hora).toLocaleDateString('es-CL')} - {new Date(ped.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>➔</span>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })()
                   )}
                 </div>
               </div>
             )}
+
+            {activeTab === 'cierre' && (
+              <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div className="admin-card-header" style={{ marginBottom: '1rem' }}>
+                    <h3 className="section-title">📊 Informe de Cierre de Caja y Reportes</h3>
+                    <p className="section-subtitle">Consulta el resumen de ventas del día e imprime o exporta reportes mensuales a Excel</p>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                    {/* Columna Izquierda: Cierre de Caja del Día */}
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                      <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📅 Cierre Diario</h4>
+                      
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', alignItems: 'center' }}>
+                        <label style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Fecha:</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          style={{ padding: '0.35rem 0.75rem', fontSize: '0.9rem', height: '36px', width: '150px', color: 'var(--text-primary)' }}
+                          value={fechaCierre}
+                          onChange={(e) => setFechaCierre(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ height: '36px', padding: '0 1rem', fontSize: '0.85rem' }}
+                          onClick={() => cargarCierreCaja()}
+                        >
+                          🔄 Recargar
+                        </button>
+                      </div>
+
+                      {loadingCierre ? (
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                          <div className="spinner"></div>
+                          <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Cargando datos del cierre...</p>
+                        </div>
+                      ) : errorCierre ? (
+                        <div className="alert alert-error" style={{ margin: 0 }}>
+                          <span>{errorCierre}</span>
+                        </div>
+                      ) : cierreData ? (
+                        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.25rem' }}>
+                          <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '1rem', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Ventas Totales:</span>
+                              <strong style={{ fontSize: '1.2rem', color: 'var(--accent-primary)' }}>
+                                ${cierreData.total_ventas.toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                              </strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>Rango de Tickets:</span>
+                              <span style={{ fontWeight: 'bold' }}>
+                                {cierreData.ticket_inicio ? `Ticket #${cierreData.ticket_inicio} al #${cierreData.ticket_fin}` : 'Sin ventas hoy'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1rem', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                              <span>💵 Total Efectivo:</span>
+                              <strong>${cierreData.total_efectivo.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                              <span>💳 Total Débito:</span>
+                              <strong>${cierreData.total_debito.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                              <span>💳 Total Crédito:</span>
+                              <strong>${cierreData.total_credito.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '0.5rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                              <span>💳 Total Tarjeta (Créd+Déb):</span>
+                              <strong>${cierreData.total_tarjeta.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p style={{ color: 'var(--text-muted)' }}>Selecciona una fecha para visualizar el cierre.</p>
+                      )}
+                    </div>
+
+                    {/* Columna Derecha: Exportar Resumen Mensual a Excel */}
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                      <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📈 Reporte Mensual a Excel</h4>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+                        Descarga un archivo de Excel (.xlsx) con el resumen diario de ventas (separando efectivo de tarjetas) de todo el mes seleccionado.
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Mes:</label>
+                          <input
+                            type="month"
+                            className="form-input"
+                            style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
+                            value={mesExcel}
+                            onChange={(e) => setMesExcel(e.target.value)}
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          style={{ marginTop: '1rem', height: '42px', gap: '0.5rem' }}
+                          onClick={descargarExcelMensual}
+                        >
+                          📥 Descargar Excel (.xlsx)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Overlay / Comanda / etc. */}
           </div>
         )}
       </main>
@@ -1645,6 +1966,32 @@ function App() {
                   </div>
                 </div>
                 <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Tipo de Transacción</label>
+                  <div className="delivery-selector-group" style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className={`delivery-option-btn ${tipoTransaccion === 'Efectivo' ? 'active' : ''}`}
+                      onClick={() => setTipoTransaccion('Efectivo')}
+                    >
+                      💵 Efectivo
+                    </button>
+                    <button
+                      type="button"
+                      className={`delivery-option-btn ${tipoTransaccion === 'Débito' ? 'active' : ''}`}
+                      onClick={() => setTipoTransaccion('Débito')}
+                    >
+                      💳 Débito
+                    </button>
+                    <button
+                      type="button"
+                      className={`delivery-option-btn ${tipoTransaccion === 'Crédito' ? 'active' : ''}`}
+                      onClick={() => setTipoTransaccion('Crédito')}
+                    >
+                      💳 Crédito
+                    </button>
+                  </div>
+                </div>
+                <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.35rem' }}>Nota para la Cocina (Opcional)</label>
                   <textarea
                     className="form-input"
@@ -1684,8 +2031,9 @@ function App() {
               <h2 className="comanda-client-name">{comandaData.cliente}</h2>
               <div className="comanda-local-name">Calibre 25</div>
               <div className="comanda-ticket-number">Ticket N° {comandaData.ticket}</div>
-              <div style={{ marginTop: '0.5rem', fontWeight: 'bold', fontSize: '0.95rem', color: comandaData.tipo_entrega === 'Llevar' ? '#f87171' : '#34d399' }}>
+              <div style={{ marginTop: '0.5rem', fontWeight: 'bold', fontSize: '0.95rem', color: comandaData.tipo_entrega === 'Llevar' ? '#dc2626' : '#059669' }}>
                 {comandaData.tipo_entrega === 'Llevar' ? 'PARA LLEVAR' : 'PARA SERVIR'}
+                {comandaData.tipo_transaccion && ` | MÉT. PAGO: ${comandaData.tipo_transaccion.toUpperCase()}`}
               </div>
               <div className="comanda-date-time">
                 <span>Fecha: {new Date(comandaData.fecha_hora).toLocaleDateString('es-CL')}</span>
@@ -1720,7 +2068,7 @@ function App() {
             {/* Pie del Ticket */}
             <div className="comanda-footer">
               {comandaData.nota && (
-                <div className="comanda-note" style={{ borderBottom: '1px dashed rgba(255, 255, 255, 0.1)', paddingBottom: '0.5rem', marginBottom: '0.5rem', fontStyle: 'italic', fontSize: '0.85rem', color: '#fda4af', textAlign: 'left' }}>
+                <div className="comanda-note" style={{ borderBottom: '1.5px dashed var(--ticket-border)', paddingBottom: '0.5rem', marginBottom: '0.5rem', fontStyle: 'italic', fontSize: '0.85rem', color: 'var(--ticket-text-secondary)', textAlign: 'left' }}>
                   Nota: "{comandaData.nota}"
                 </div>
               )}
@@ -1740,7 +2088,7 @@ function App() {
               {window.electronAPI && (
                 <button
                   type="button"
-                  className="btn-secondary"
+                  className="btn-secondary comanda-btn-print"
                   style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
                   onClick={() => window.electronAPI.printTicket(comandaData)}
                 >
@@ -1759,6 +2107,15 @@ function App() {
           </div>
         </div>
       )}
+      
+      <button 
+        type="button"
+        onClick={() => setIsDark(!isDark)} 
+        className="theme-toggle"
+        title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+      >
+        {isDark ? '☀️ Claro' : '🌙 Oscuro'}
+      </button>
     </>
   );
 }
