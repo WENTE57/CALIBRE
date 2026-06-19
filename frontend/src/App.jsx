@@ -56,12 +56,21 @@ function App() {
   const [prodError, setProdError] = useState('');
   const [prodSuccess, setProdSuccess] = useState('');
   const [prodLoading, setProdLoading] = useState(false);
+  const [editandoProdId, setEditandoProdId] = useState(null);
 
   // Estados para ingredientes en productos
   const [listaIngredientes, setListaIngredientes] = useState([]);
   const [ingredientesSeleccionados, setIngredientesSeleccionados] = useState([]);
   const [currIngredienteId, setCurrIngredienteId] = useState('');
   const [currIngredienteCantidad, setCurrIngredienteCantidad] = useState('');
+
+  // Estados para administración de ingredientes en Inventario
+  const [ingNombre, setIngNombre] = useState('');
+  const [ingStock, setIngStock] = useState('');
+  const [ingError, setIngError] = useState('');
+  const [ingSuccess, setIngSuccess] = useState('');
+  const [ingLoading, setIngLoading] = useState(false);
+  const [editandoIngId, setEditandoIngId] = useState(null);
 
   // Filtro de categorías en Catálogo POS
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('Todos');
@@ -92,6 +101,20 @@ function App() {
     const y = today.getFullYear();
     const m = String(today.getMonth() + 1).padStart(2, '0');
     return `${y}-${m}`;
+  });
+  const [fechaInicioReporte, setFechaInicioReporte] = useState(() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  });
+  const [fechaFinReporte, setFechaFinReporte] = useState(() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   });
   const [cierreData, setCierreData] = useState(null);
   const [loadingCierre, setLoadingCierre] = useState(false);
@@ -408,8 +431,13 @@ function App() {
     setProdSuccess('');
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/productos', {
-        method: 'POST',
+      const url = editandoProdId
+        ? `http://127.0.0.1:5000/api/productos/${editandoProdId}`
+        : 'http://127.0.0.1:5000/api/productos';
+      const method = editandoProdId ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method: method,
         headers: {
           'Content-Type': 'application/json',
         },
@@ -428,7 +456,7 @@ function App() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setProdSuccess(data.message || 'Producto creado correctamente.');
+        setProdSuccess(data.message || (editandoProdId ? 'Producto actualizado correctamente.' : 'Producto creado correctamente.'));
         setProdNombre('');
         setProdPrecio('');
         setProdImagen('🍔');
@@ -436,9 +464,10 @@ function App() {
         setIngredientesSeleccionados([]);
         setCurrIngredienteId('');
         setCurrIngredienteCantidad('');
+        setEditandoProdId(null);
         cargarProductos();
       } else {
-        setProdError(data.message || 'Error al crear el producto.');
+        setProdError(data.message || (editandoProdId ? 'Error al actualizar el producto.' : 'Error al crear el producto.'));
       }
     } catch (err) {
       console.error(err);
@@ -446,6 +475,38 @@ function App() {
     } finally {
       setProdLoading(false);
     }
+  };
+
+  const iniciarEdicionProd = (prod) => {
+    setEditandoProdId(prod.id);
+    setProdNombre(prod.nombre);
+    setProdPrecio(prod.precio);
+    setProdImagen(prod.imagen || '🍔');
+    setProdCategoria(prod.categoria || 'Otros');
+    if (prod.ingredientes && Array.isArray(prod.ingredientes)) {
+      setIngredientesSeleccionados(
+        prod.ingredientes.map(ing => ({
+          ingrediente_id: ing.id,
+          nombre: ing.nombre,
+          cantidad: ing.cantidad
+        }))
+      );
+    } else {
+      setIngredientesSeleccionados([]);
+    }
+  };
+
+  const cancelarEdicionProd = () => {
+    setEditandoProdId(null);
+    setProdNombre('');
+    setProdPrecio('');
+    setProdImagen('🍔');
+    setProdCategoria(listaCategorias[0]?.nombre || '');
+    setIngredientesSeleccionados([]);
+    setCurrIngredienteId('');
+    setCurrIngredienteCantidad('');
+    setProdError('');
+    setProdSuccess('');
   };
 
   const handleDeleteProduct = (productId, productName) => {
@@ -468,6 +529,133 @@ function App() {
         } catch (err) {
           console.error(err);
           setProdError('Error al conectar con el servidor para eliminar el producto.');
+        }
+      }
+    );
+  };
+
+  const handleCreateIngredient = async (e) => {
+    e.preventDefault();
+    if (!ingNombre.trim()) {
+      setIngError('Escribe el nombre del ingrediente.');
+      setIngSuccess('');
+      return;
+    }
+    setIngError('');
+    setIngSuccess('');
+    setIngLoading(true);
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/ingredientes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nombre: ingNombre.trim(),
+          stock: parseFloat(ingStock.toString().replace(',', '.')) || 0.0,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setIngSuccess(data.message);
+        setIngNombre('');
+        setIngStock('');
+        cargarIngredientes();
+        setTimeout(() => setIngSuccess(''), 3000);
+      } else {
+        setIngError(data.message || 'Error al crear ingrediente.');
+      }
+    } catch (err) {
+      console.error(err);
+      setIngError('Error de red al conectar con el servidor.');
+    } finally {
+      setIngLoading(false);
+    }
+  };
+
+  const iniciarEdicionIng = (ing) => {
+    setEditandoIngId(ing.id);
+    setIngNombre(ing.nombre);
+    setIngStock(ing.stock.toString());
+    setIngError('');
+    setIngSuccess('');
+  };
+
+  const cancelarEdicionIng = () => {
+    setEditandoIngId(null);
+    setIngNombre('');
+    setIngStock('');
+    setIngError('');
+    setIngSuccess('');
+  };
+
+  const handleUpdateIngredient = async (e) => {
+    e.preventDefault();
+    if (!ingNombre.trim()) {
+      setIngError('Escribe el nombre del ingrediente.');
+      setIngSuccess('');
+      return;
+    }
+    setIngError('');
+    setIngSuccess('');
+    setIngLoading(true);
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/ingredientes/${editandoIngId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nombre: ingNombre.trim(),
+          stock: parseFloat(ingStock.toString().replace(',', '.')) || 0.0,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setIngSuccess(data.message);
+        setIngNombre('');
+        setIngStock('');
+        setEditandoIngId(null);
+        await cargarIngredientes();
+        setTimeout(() => setIngSuccess(''), 3000);
+      } else {
+        setIngError(data.message || 'Error al actualizar ingrediente.');
+      }
+    } catch (err) {
+      console.error(err);
+      setIngError('Error de red al conectar con el servidor.');
+    } finally {
+      setIngLoading(false);
+    }
+  };
+
+  const handleDeleteIngredient = (ingId, ingNombre) => {
+    abrirConfirmacion(
+      `¿Estás seguro de que deseas eliminar el ingrediente "${ingNombre}"? Esto puede afectar a las recetas de los productos que lo usen.`,
+      'Confirmar Eliminación',
+      async () => {
+        setIngError('');
+        setIngSuccess('');
+        try {
+          const response = await fetch(`http://127.0.0.1:5000/api/ingredientes/${ingId}`, {
+            method: 'DELETE',
+          });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            setIngSuccess(data.message);
+            if (editandoIngId === ingId) {
+              setEditandoIngId(null);
+              setIngNombre('');
+              setIngStock('');
+            }
+            await cargarIngredientes();
+            setTimeout(() => setIngSuccess(''), 3000);
+          } else {
+            setIngError(data.message || 'Error al eliminar ingrediente.');
+          }
+        } catch (err) {
+          console.error(err);
+          setIngError('Error de red al conectar con el servidor.');
         }
       }
     );
@@ -499,7 +687,7 @@ function App() {
   }, [user, activeTab]);
 
   useEffect(() => {
-    if (user && (activeTab === 'productos' || activeTab === 'categorias')) {
+    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario')) {
       cargarIngredientes();
       cargarCategorias();
     }
@@ -529,6 +717,11 @@ function App() {
   const descargarExcelMensual = () => {
     if (!mesExcel) return;
     window.open(`http://127.0.0.1:5000/api/informes/excel?mes=${mesExcel}`);
+  };
+
+  const descargarReporteProductosRango = () => {
+    if (!fechaInicioReporte || !fechaFinReporte) return;
+    window.open(`http://127.0.0.1:5000/api/informes/rango-productos/excel?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`);
   };
 
   useEffect(() => {
@@ -913,6 +1106,12 @@ function App() {
                     >
                       🏷️ Categorías
                     </button>
+                    <button 
+                      onClick={() => setActiveTab('inventario')} 
+                      className={`nav-tab ${activeTab === 'inventario' ? 'active' : ''}`}
+                    >
+                      🥑 Inventario
+                    </button>
                   </>
                 )}
                 <button 
@@ -981,17 +1180,8 @@ function App() {
                         <div className="product-emoji">{prod.imagen || '🍔'}</div>
                         <div className="product-info">
                           <h4 className="product-name">{prod.nombre}</h4>
-                          {prod.ingredientes && prod.ingredientes.length > 0 && (
-                            <div className="product-card-ingredients">
-                              {prod.ingredientes.map(ing => (
-                                <span key={ing.id} className="card-ingredient-tag">
-                                  {ing.nombre} ({ing.cantidad})
-                                </span>
-                              ))}
-                            </div>
-                          )}
                           <span className="product-price">
-                            ${parseFloat(prod.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                             ${parseFloat(prod.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
                           </span>
                         </div>
                         <button className="btn-add">
@@ -1226,8 +1416,12 @@ function App() {
                 <div className="admin-grid-layout">
                   {/* Formulario de creación */}
                   <div className="admin-section">
-                    <h3 className="section-title">📦 Registrar Nuevo Producto</h3>
-                    <p className="section-subtitle">Registra un nuevo plato o artículo al catálogo</p>
+                    <h3 className="section-title">
+                      {editandoProdId ? '✏️ Editar Producto' : '📦 Registrar Nuevo Producto'}
+                    </h3>
+                    <p className="section-subtitle">
+                      {editandoProdId ? 'Edita los datos del producto seleccionado' : 'Registra un nuevo plato o artículo al catálogo'}
+                    </p>
                     
                     {prodError && (
                       <div className="alert alert-error">
@@ -1385,16 +1579,29 @@ function App() {
                         )}
                       </div>
 
-                      <button type="submit" className="btn-primary" disabled={prodLoading}>
-                        {prodLoading ? (
-                          <>
-                            <div className="spinner"></div>
-                            <span>Registrando...</span>
-                          </>
-                        ) : (
-                          <span>Registrar Producto</span>
+                      <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                        <button type="submit" className="btn-primary" style={{ flex: 1 }} disabled={prodLoading}>
+                          {prodLoading ? (
+                            <>
+                              <div className="spinner"></div>
+                              <span>{editandoProdId ? 'Guardando...' : 'Registrando...'}</span>
+                            </>
+                          ) : (
+                            <span>{editandoProdId ? 'Guardar Cambios' : 'Registrar Producto'}</span>
+                          )}
+                        </button>
+                        {editandoProdId && (
+                          <button
+                            type="button"
+                            onClick={cancelarEdicionProd}
+                            className="btn-secondary"
+                            style={{ flex: 1 }}
+                            disabled={prodLoading}
+                          >
+                            Cancelar
+                          </button>
                         )}
-                      </button>
+                      </div>
                     </form>
                   </div>
 
@@ -1420,18 +1627,10 @@ function App() {
                       <div className="users-list-container">
                         {productos.map((p) => (
                           <div key={p.id} className="user-list-item">
-                            <div className="user-list-info">
-                              <div className="product-list-main-info">
-                                <span className="user-list-name">
-                                  {p.imagen || '🍔'} {p.nombre}
-                                </span>
-                                <div className="product-list-badges">
-                                  <span className="badge badge-category">{p.categoria || 'Otros'}</span>
-                                  <span className="badge">
-                                    ${parseFloat(p.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                                  </span>
-                                </div>
-                              </div>
+                            <div className="user-list-info" style={{ flexGrow: 1 }}>
+                              <span className="user-list-name">
+                                {p.imagen || '🍔'} {p.nombre}
+                              </span>
                               {p.ingredientes && p.ingredientes.length > 0 && (
                                 <div className="product-list-ingredients">
                                   <span className="ingredients-label">Ingredientes:</span>{' '}
@@ -1439,13 +1638,32 @@ function App() {
                                 </div>
                               )}
                             </div>
-                            <button
-                              onClick={() => handleDeleteProduct(p.id, p.nombre)}
-                              className="btn-delete-user"
-                              title="Eliminar producto"
-                            >
-                              🗑️
-                            </button>
+                            
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                              <div className="product-list-badges" style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
+                                <span className="badge badge-category">{p.categoria || 'Otros'}</span>
+                                <span className="badge">
+                                  ${parseFloat(p.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                </span>
+                              </div>
+                              
+                              <button
+                                onClick={() => iniciarEdicionProd(p)}
+                                className="btn-edit-user"
+                                title="Editar producto"
+                                style={{ marginRight: '-0.75rem' }}
+                              >
+                                ✏️
+                              </button>
+                              
+                              <button
+                                onClick={() => handleDeleteProduct(p.id, p.nombre)}
+                                className="btn-delete-user"
+                                title="Eliminar producto"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1538,7 +1756,7 @@ function App() {
                   </div>
 
                   {/* Listado de categorías */}
-                  <div className="admin-section">
+                  <div className="admin-section users-list-section">
                     <h3 className="section-title">📋 Categorías Registradas</h3>
                     <p className="section-subtitle">Lista de categorías disponibles para clasificar productos</p>
 
@@ -1853,34 +2071,219 @@ function App() {
                       )}
                     </div>
 
-                    {/* Columna Derecha: Exportar Resumen Mensual a Excel */}
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
-                      <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📈 Reporte Mensual a Excel</h4>
-                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
-                        Descarga un archivo de Excel (.xlsx) con el resumen diario de ventas (separando efectivo de tarjetas) de todo el mes seleccionado.
-                      </p>
+                    {/* Columna Derecha: Reportes y Exportaciones */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: '100%', overflowY: 'auto', paddingRight: '0.25rem' }}>
+                      {/* Reporte Mensual a Excel */}
+                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📈 Reporte Mensual a Excel</h4>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+                          Descarga un archivo de Excel (.xlsx) con el resumen diario de ventas (separando efectivo de tarjetas) de todo el mes seleccionado.
+                        </p>
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                          <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Mes:</label>
-                          <input
-                            type="month"
-                            className="form-input"
-                            style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
-                            value={mesExcel}
-                            onChange={(e) => setMesExcel(e.target.value)}
-                          />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Mes:</label>
+                            <input
+                              type="month"
+                              className="form-input"
+                              style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
+                              value={mesExcel}
+                              onChange={(e) => setMesExcel(e.target.value)}
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            style={{ marginTop: '1rem', height: '42px', gap: '0.5rem' }}
+                            onClick={descargarExcelMensual}
+                          >
+                            📥 Descargar Excel (.xlsx)
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Nuevo Reporte de Ventas Detallado por Rango de Fechas */}
+                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📊 Reporte de Ventas por Rango (Detallado)</h4>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+                          Descarga un archivo de Excel (.xlsx) con el detalle de todos los productos vendidos, sus cantidades y los montos totales recaudados entre las fechas seleccionadas.
+                        </p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                          <div style={{ display: 'flex', gap: '1rem' }}>
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Fecha Inicio:</label>
+                              <input
+                                type="date"
+                                className="form-input"
+                                style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
+                                value={fechaInicioReporte}
+                                onChange={(e) => setFechaInicioReporte(e.target.value)}
+                              />
+                            </div>
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Fecha Fin:</label>
+                              <input
+                                type="date"
+                                className="form-input"
+                                style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
+                                value={fechaFinReporte}
+                                onChange={(e) => setFechaFinReporte(e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            style={{ marginTop: '1rem', height: '42px', gap: '0.5rem' }}
+                            onClick={descargarReporteProductosRango}
+                          >
+                            📥 Descargar Reporte (.xlsx)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'inventario' && (
+              <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div className="admin-card-header" style={{ marginBottom: '1rem' }}>
+                    <h3 className="section-title">🥑 Inventario de Ingredientes</h3>
+                    <p className="section-subtitle">Visualiza y gestiona las existencias (stock) de ingredientes para tus productos</p>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '2rem', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                    {/* Columna Izquierda: Formulario de Registro/Edición */}
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                      <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>
+                        {editandoIngId ? '✏️ Editar Ingrediente' : '➕ Nuevo Ingrediente'}
+                      </h4>
+
+                      {ingError && (
+                        <div className="alert alert-error" style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem' }}>
+                          <span>{ingError}</span>
+                        </div>
+                      )}
+                      {ingSuccess && (
+                        <div className="alert alert-success" style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem' }}>
+                          <span>{ingSuccess}</span>
+                        </div>
+                      )}
+
+                      <form onSubmit={editandoIngId ? handleUpdateIngredient : handleCreateIngredient} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Nombre del Ingrediente</label>
+                          <div className="input-wrapper">
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Ej. Carne de Res (gramos)"
+                              value={ingNombre}
+                              onChange={(e) => setIngNombre(e.target.value)}
+                              disabled={ingLoading}
+                            />
+                            <span className="input-icon">🥑</span>
+                          </div>
                         </div>
 
-                        <button
-                          type="button"
-                          className="btn-primary"
-                          style={{ marginTop: '1rem', height: '42px', gap: '0.5rem' }}
-                          onClick={descargarExcelMensual}
-                        >
-                          📥 Descargar Excel (.xlsx)
-                        </button>
-                      </div>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Stock Actual (Cantidad)</label>
+                          <div className="input-wrapper">
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Ej. 1000"
+                              value={ingStock}
+                              onChange={(e) => setIngStock(e.target.value)}
+                              disabled={ingLoading}
+                            />
+                            <span className="input-icon">📦</span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                          {editandoIngId ? (
+                            <>
+                              <button type="submit" className="btn-primary" style={{ flex: 1 }} disabled={ingLoading}>
+                                Guardar
+                              </button>
+                              <button type="button" onClick={cancelarEdicionIng} className="btn-secondary" style={{ flex: 1 }} disabled={ingLoading}>
+                                Cancelar
+                              </button>
+                            </>
+                          ) : (
+                            <button type="submit" className="btn-primary" style={{ width: '100%' }} disabled={ingLoading}>
+                              {ingLoading ? 'Registrando...' : 'Registrar Ingrediente'}
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    </div>
+
+                    {/* Columna Derecha: Tabla de Ingredientes y cantidades */}
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                      <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📋 Existencias Actuales</h4>
+
+                      {listaIngredientes.length === 0 ? (
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <p style={{ color: 'var(--text-muted)' }}>No hay ingredientes en el inventario.</p>
+                        </div>
+                      ) : (
+                        <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                                <th style={{ padding: '0.5rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Ingrediente</th>
+                                <th style={{ padding: '0.5rem', color: 'var(--text-secondary)', fontWeight: '600', textAlign: 'right' }}>Stock Disponible</th>
+                                <th style={{ padding: '0.5rem', color: 'var(--text-secondary)', fontWeight: '600', textAlign: 'center' }}>Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {listaIngredientes.map((ing) => {
+                                const stockNum = parseFloat(ing.stock);
+                                const isLowStock = stockNum <= 50; // alerta de stock bajo
+                                return (
+                                  <tr key={ing.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'middle' }}>
+                                    <td style={{ padding: '0.75rem 0.5rem', fontWeight: '500', color: 'var(--text-primary)' }}>
+                                      {ing.nombre}
+                                    </td>
+                                    <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right', fontWeight: '700', color: isLowStock ? 'var(--error)' : 'var(--text-primary)' }}>
+                                      {stockNum.toLocaleString('es-CL', { maximumFractionDigits: 2 })}
+                                      {isLowStock && <span style={{ marginLeft: '0.35rem', fontSize: '0.85rem' }} title="Stock bajo">⚠️</span>}
+                                    </td>
+                                    <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center' }}>
+                                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => iniciarEdicionIng(ing)}
+                                          style={{ background: 'rgba(255,255,255,0.05)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: '8px' }}
+                                          title="Editar ingrediente / stock"
+                                        >
+                                          ✏️
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteIngredient(ing.id, ing.nombre)}
+                                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: '8px' }}
+                                          title="Eliminar ingrediente"
+                                        >
+                                          🗑️
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -345,6 +345,76 @@ app.post('/api/productos', async (req, res) => {
   }
 });
 
+// Endpoint de Editar Producto (con transacción para actualizar ingredientes)
+app.put('/api/productos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { nombre, precio, imagen, categoria, ingredientes } = req.body;
+
+  // Validación básica
+  if (!nombre || !precio) {
+    return res.status(400).json({
+      success: false,
+      message: 'Por favor, completa los campos obligatorios (nombre y precio).'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Comprobar si el producto existe
+    const prodCheck = await client.query('SELECT id, nombre FROM productos WHERE id = $1', [id]);
+    if (prodCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'El producto no existe.' });
+    }
+
+    const nombreNuevo = nombre.trim();
+    // Comprobar si el nuevo nombre ya está ocupado por otro producto
+    const nameExist = await client.query('SELECT id FROM productos WHERE nombre = $1 AND id <> $2', [nombreNuevo, id]);
+    if (nameExist.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Ya existe otro producto registrado con este nombre.' });
+    }
+
+    // Actualizar producto en la tabla productos
+    await client.query(
+      'UPDATE productos SET nombre = $1, precio = $2, imagen = $3, categoria = $4 WHERE id = $5',
+      [nombreNuevo, parseFloat(precio), imagen ? imagen.trim() : '🍔', categoria ? categoria.trim() : 'Otros', id]
+    );
+
+    // Eliminar asociaciones de ingredientes previas
+    await client.query('DELETE FROM producto_ingredientes WHERE producto_id = $1', [id]);
+
+    // Insertar nuevas asociaciones de ingredientes
+    if (ingredientes && Array.isArray(ingredientes) && ingredientes.length > 0) {
+      for (const ing of ingredientes) {
+        await client.query(
+          'INSERT INTO producto_ingredientes (producto_id, ingrediente_id, cantidad) VALUES ($1, $2, $3)',
+          [id, parseInt(ing.ingrediente_id), parseFloat(ing.cantidad)]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: `Producto "${nombreNuevo}" actualizado con éxito.`
+    });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en PUT /api/productos:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno del servidor al actualizar el producto.'
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // Endpoint de Eliminar Producto (para administración)
 app.delete('/api/productos/:id', async (req, res) => {
   const { id } = req.params;
@@ -389,6 +459,116 @@ app.get('/api/ingredientes', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al obtener los ingredientes de la base de datos.'
+    });
+  }
+});
+
+// Endpoint de Crear Ingrediente (para administración)
+app.post('/api/ingredientes', async (req, res) => {
+  const { nombre, stock } = req.body;
+  if (!nombre || !nombre.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'El nombre del ingrediente es obligatorio.'
+    });
+  }
+  try {
+    const exist = await pool.query('SELECT id FROM ingredientes WHERE nombre = $1', [nombre.trim()]);
+    if (exist.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Ya existe un ingrediente con este nombre.'
+      });
+    }
+    const result = await pool.query(
+      'INSERT INTO ingredientes (nombre, stock) VALUES ($1, $2) RETURNING id, nombre, stock',
+      [nombre.trim(), parseFloat(stock) || 0.0]
+    );
+    res.status(201).json({
+      success: true,
+      message: `Ingrediente "${result.rows[0].nombre}" creado con éxito.`,
+      ingrediente: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error en POST /api/ingredientes:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al registrar el ingrediente en la base de datos.'
+    });
+  }
+});
+
+// Endpoint de Editar Ingrediente (para administración)
+app.put('/api/ingredientes/:id', async (req, res) => {
+  const { id } = req.params;
+  const { nombre, stock } = req.body;
+  if (!nombre || !nombre.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'El nombre del ingrediente es obligatorio.'
+    });
+  }
+  try {
+    // Comprobar duplicado si cambia nombre
+    const ingRes = await pool.query('SELECT nombre FROM ingredientes WHERE id = $1', [id]);
+    if (ingRes.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'El ingrediente no existe.'
+      });
+    }
+    const nombreAntiguo = ingRes.rows[0].nombre;
+    const nombreNuevo = nombre.trim();
+
+    if (nombreAntiguo !== nombreNuevo) {
+      const dupRes = await pool.query('SELECT id FROM ingredientes WHERE nombre = $1', [nombreNuevo]);
+      if (dupRes.rows.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Ya existe otro ingrediente con este nombre.'
+        });
+      }
+    }
+
+    const result = await pool.query(
+      'UPDATE ingredientes SET nombre = $1, stock = $2 WHERE id = $3 RETURNING id, nombre, stock',
+      [nombreNuevo, parseFloat(stock) || 0.0, id]
+    );
+
+    res.json({
+      success: true,
+      message: `Ingrediente actualizado con éxito.`,
+      ingrediente: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error en PUT /api/ingredientes:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al actualizar el ingrediente.'
+    });
+  }
+});
+
+// Endpoint de Eliminar Ingrediente (para administración)
+app.delete('/api/ingredientes/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('DELETE FROM ingredientes WHERE id = $1 RETURNING id, nombre', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'El ingrediente no existe.'
+      });
+    }
+    res.json({
+      success: true,
+      message: `Ingrediente "${result.rows[0].nombre}" eliminado correctamente.`
+    });
+  } catch (err) {
+    console.error('Error en DELETE /api/ingredientes:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al eliminar el ingrediente de la base de datos.'
     });
   }
 });
@@ -756,6 +936,82 @@ app.get('/api/informes/excel', async (req, res) => {
     res.status(500).json({ success: false, message: 'Error al generar el archivo Excel.' });
   }
 });
+
+// Endpoint de Exportar Reporte de Ventas por Rango de Fechas (Detallado por Producto)
+app.get('/api/informes/rango-productos/excel', async (req, res) => {
+  const { fecha_inicio, fecha_fin } = req.query;
+  if (!fecha_inicio || !fecha_fin) {
+    return res.status(400).json({ success: false, message: 'La fecha de inicio y la fecha de fin son requeridas.' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT 
+        dp.nombre_producto as producto,
+        SUM(dp.cantidad)::FLOAT as cantidad,
+        SUM(dp.cantidad * dp.precio_unitario)::FLOAT as total
+      FROM pedidos p
+      JOIN pedido_productos dp ON p.id = dp.pedido_id
+      WHERE DATE(p.fecha_hora) >= $1 AND DATE(p.fecha_hora) <= $2
+      GROUP BY dp.nombre_producto
+      ORDER BY cantidad DESC
+    `, [fecha_inicio, fecha_fin]);
+
+    // Crear filas del reporte
+    const rows = result.rows.map(r => ({
+      'Producto': r.producto,
+      'Cantidad Vendida': r.cantidad,
+      'Total Vendido ($)': r.total
+    }));
+
+    if (rows.length === 0) {
+      rows.push({
+        'Producto': 'Sin ventas en este rango de fechas',
+        'Cantidad Vendida': 0,
+        'Total Vendido ($)': 0
+      });
+    } else {
+      // Calcular sumas totales
+      const sumaCantidad = result.rows.reduce((sum, r) => sum + r.cantidad, 0);
+      const sumaTotal = result.rows.reduce((sum, r) => sum + r.total, 0);
+      
+      // Fila vacía para separación estética
+      rows.push({
+        'Producto': '',
+        'Cantidad Vendida': '',
+        'Total Vendido ($)': ''
+      });
+
+      // Fila con los totales generales
+      rows.push({
+        'Producto': 'TOTAL GENERAL',
+        'Cantidad Vendida': sumaCantidad,
+        'Total Vendido ($)': sumaTotal
+      });
+    }
+
+    // Generar Workbook con xlsx
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ventas por Producto');
+
+    // Configurar el ancho de las columnas
+    const max_width = [35, 20, 20];
+    ws['!cols'] = max_width.map(w => ({ wch: w }));
+
+    // Escribir el buffer
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Reporte-Ventas-Detallado-${fecha_inicio}-a-${fecha_fin}.xlsx`);
+    res.end(buf);
+
+  } catch (err) {
+    console.error('Error en GET /api/informes/rango-productos/excel:', err.message);
+    res.status(500).json({ success: false, message: 'Error al generar el archivo Excel.' });
+  }
+});
+
 
 // Iniciar servidor
 app.listen(PORT, () => {
