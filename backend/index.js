@@ -25,6 +25,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
         nombre VARCHAR(100) UNIQUE NOT NULL
       )
     `);
+    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🏷️'");
     console.log("✅ Tabla 'categorias' asegurada.");
 
     // 3. Asegurar tabla pedidos
@@ -65,6 +66,24 @@ app.use(express.json()); // Permite procesar peticiones JSON
       END $$;
     `);
     console.log("✅ Columna 'stock' en la tabla ingredientes asegurada como DECIMAL.");
+
+    // 6. Asegurar tabla cierres_caja
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cierres_caja (
+        id SERIAL PRIMARY KEY,
+        fecha DATE UNIQUE NOT NULL,
+        cierre_fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        cargado_por VARCHAR(100) NOT NULL,
+        total_ventas DECIMAL(10, 2) NOT NULL,
+        total_efectivo DECIMAL(10, 2) NOT NULL,
+        total_tarjeta DECIMAL(10, 2) NOT NULL,
+        fondo_apertura DECIMAL(10, 2) NOT NULL,
+        efectivo_real DECIMAL(10, 2) NOT NULL,
+        diferencia DECIMAL(10, 2) NOT NULL,
+        observaciones TEXT
+      )
+    `);
+    console.log("✅ Tabla 'cierres_caja' asegurada.");
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
@@ -549,6 +568,42 @@ app.put('/api/ingredientes/:id', async (req, res) => {
   }
 });
 
+// Endpoint para registrar llegada de materia prima (adicionar stock a un ingrediente)
+app.post('/api/ingredientes/:id/llegada', async (req, res) => {
+  const { id } = req.params;
+  const { cantidad } = req.body;
+  const cantidadNum = parseFloat(cantidad);
+  if (isNaN(cantidadNum) || cantidadNum <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'La cantidad que llegó debe ser un número válido mayor a 0.'
+    });
+  }
+  try {
+    const result = await pool.query(
+      'UPDATE ingredientes SET stock = stock + $1 WHERE id = $2 RETURNING id, nombre, stock',
+      [cantidadNum, id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'El ingrediente no existe.'
+      });
+    }
+    res.json({
+      success: true,
+      message: `Llegada registrada: se añadieron ${cantidadNum} unidades a "${result.rows[0].nombre}".`,
+      ingrediente: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error en POST /api/ingredientes/:id/llegada:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al registrar la llegada de materia prima.'
+    });
+  }
+});
+
 // Endpoint de Eliminar Ingrediente (para administración)
 app.delete('/api/ingredientes/:id', async (req, res) => {
   const { id } = req.params;
@@ -576,7 +631,7 @@ app.delete('/api/ingredientes/:id', async (req, res) => {
 // Endpoint de Obtener Categorías
 app.get('/api/categorias', async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, nombre FROM categorias ORDER BY nombre ASC');
+    const result = await pool.query('SELECT id, nombre, emoji FROM categorias ORDER BY nombre ASC');
     res.json({
       success: true,
       categorias: result.rows
@@ -592,7 +647,7 @@ app.get('/api/categorias', async (req, res) => {
 
 // Endpoint de Registrar Categoría
 app.post('/api/categorias', async (req, res) => {
-  const { nombre } = req.body;
+  const { nombre, emoji } = req.body;
   if (!nombre || !nombre.trim()) {
     return res.status(400).json({
       success: false,
@@ -608,8 +663,8 @@ app.post('/api/categorias', async (req, res) => {
       });
     }
     const result = await pool.query(
-      'INSERT INTO categorias (nombre) VALUES ($1) RETURNING id, nombre',
-      [nombre.trim()]
+      'INSERT INTO categorias (nombre, emoji) VALUES ($1, $2) RETURNING id, nombre, emoji',
+      [nombre.trim(), emoji ? emoji.trim() : '🏷️']
     );
     res.status(201).json({
       success: true,
@@ -628,7 +683,7 @@ app.post('/api/categorias', async (req, res) => {
 // Endpoint de Editar Categoría
 app.put('/api/categorias/:id', async (req, res) => {
   const { id } = req.params;
-  const { nombre } = req.body;
+  const { nombre, emoji } = req.body;
   if (!nombre || !nombre.trim()) {
     return res.status(400).json({
       success: false,
@@ -668,7 +723,7 @@ app.put('/api/categorias/:id', async (req, res) => {
     await client.query('UPDATE productos SET categoria = $1 WHERE categoria = $2', [catNombreNuevo, catNombreAntiguo]);
 
     // Actualizar la categoría
-    await client.query('UPDATE categorias SET nombre = $1 WHERE id = $2', [catNombreNuevo, id]);
+    await client.query('UPDATE categorias SET nombre = $1, emoji = $2 WHERE id = $3', [catNombreNuevo, emoji ? emoji.trim() : '🏷️', id]);
 
     await client.query('COMMIT');
     res.json({
@@ -858,6 +913,33 @@ app.get('/api/informes/cierre', async (req, res) => {
     const total_credito = row.total_credito;
     const total_tarjeta = total_debito + total_credito;
 
+    // Consultar el desglose de productos vendidos en el día
+    const productosResult = await pool.query(`
+      SELECT 
+        nombre_producto,
+        SUM(cantidad)::INTEGER as cantidad_vendida,
+        SUM(cantidad * precio_unitario)::INTEGER as total_pesos
+      FROM pedidos p
+      JOIN pedido_productos pp ON p.id = pp.pedido_id
+      WHERE DATE(p.fecha_hora) = $1
+      GROUP BY nombre_producto
+      ORDER BY cantidad_vendida DESC
+    `, [fecha]);
+
+    // Consultar el gasto teórico de ingredientes (materia prima) basado en las recetas de los productos vendidos
+    const ingredientesResult = await pool.query(`
+      SELECT 
+        i.nombre as ingrediente_nombre,
+        SUM(pp.cantidad * pi.cantidad)::FLOAT as cantidad_gastada
+      FROM pedidos p
+      JOIN pedido_productos pp ON p.id = pp.pedido_id
+      JOIN producto_ingredientes pi ON pp.producto_id = pi.producto_id
+      JOIN ingredientes i ON pi.ingrediente_id = i.id
+      WHERE DATE(p.fecha_hora) = $1
+      GROUP BY i.id, i.nombre
+      ORDER BY cantidad_gastada DESC
+    `, [fecha]);
+
     res.json({
       success: true,
       data: {
@@ -868,12 +950,143 @@ app.get('/api/informes/cierre', async (req, res) => {
         total_efectivo,
         total_debito,
         total_credito,
-        total_tarjeta
+        total_tarjeta,
+        productos_vendidos: productosResult.rows,
+        ingredientes_gastados: ingredientesResult.rows
       }
     });
   } catch (err) {
     console.error('Error en GET /api/informes/cierre:', err.message);
     res.status(500).json({ success: false, message: 'Error al obtener el informe de cierre.' });
+  }
+});
+
+// Endpoint para consultar el cuadrado de caja de una fecha específica
+app.get('/api/cierres/:fecha', async (req, res) => {
+  const { fecha } = req.params; // YYYY-MM-DD
+  if (!fecha) {
+    return res.status(400).json({ success: false, message: 'La fecha es requerida.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT 
+        id, 
+        TO_CHAR(fecha, 'YYYY-MM-DD') as fecha, 
+        cierre_fecha_hora, 
+        cargado_por, 
+        total_ventas::FLOAT, 
+        total_efectivo::FLOAT, 
+        total_tarjeta::FLOAT, 
+        fondo_apertura::FLOAT, 
+        efectivo_real::FLOAT, 
+        diferencia::FLOAT, 
+        observaciones 
+      FROM cierres_caja 
+      WHERE fecha = $1`,
+      [fecha]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ success: true, exists: false, data: null });
+    }
+
+    res.json({
+      success: true,
+      exists: true,
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error en GET /api/cierres/:fecha:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener el cierre de caja de la base de datos.' });
+  }
+});
+
+// Endpoint para guardar o actualizar (UPSERT) el cuadrado de caja
+app.post('/api/cierres', async (req, res) => {
+  const {
+    fecha,
+    cargado_por,
+    total_ventas,
+    total_efectivo,
+    total_tarjeta,
+    fondo_apertura,
+    efectivo_real,
+    observaciones
+  } = req.body;
+
+  if (
+    !fecha || 
+    !cargado_por || 
+    total_ventas === undefined || 
+    total_efectivo === undefined || 
+    total_tarjeta === undefined || 
+    fondo_apertura === undefined || 
+    efectivo_real === undefined
+  ) {
+    return res.status(400).json({ success: false, message: 'Datos incompletos para registrar el cierre de caja.' });
+  }
+
+  const fApertura = parseFloat(fondo_apertura);
+  const eReal = parseFloat(efectivo_real);
+  const tEfectivo = parseFloat(total_efectivo);
+  const tVentas = parseFloat(total_ventas);
+  const tTarjeta = parseFloat(total_tarjeta);
+
+  // Diferencia = Efectivo Real - (Efectivo Ventas + Fondo Apertura)
+  const dif = eReal - (tEfectivo + fApertura);
+
+  try {
+    const queryStr = `
+      INSERT INTO cierres_caja (
+        fecha, cargado_por, total_ventas, total_efectivo, total_tarjeta, fondo_apertura, efectivo_real, diferencia, observaciones
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (fecha)
+      DO UPDATE SET
+        cierre_fecha_hora = CURRENT_TIMESTAMP,
+        cargado_por = EXCLUDED.cargado_por,
+        total_ventas = EXCLUDED.total_ventas,
+        total_efectivo = EXCLUDED.total_efectivo,
+        total_tarjeta = EXCLUDED.total_tarjeta,
+        fondo_apertura = EXCLUDED.fondo_apertura,
+        efectivo_real = EXCLUDED.efectivo_real,
+        diferencia = EXCLUDED.diferencia,
+        observaciones = EXCLUDED.observaciones
+      RETURNING 
+        id, 
+        TO_CHAR(fecha, 'YYYY-MM-DD') as fecha, 
+        cierre_fecha_hora, 
+        cargado_por, 
+        total_ventas::FLOAT, 
+        total_efectivo::FLOAT, 
+        total_tarjeta::FLOAT, 
+        fondo_apertura::FLOAT, 
+        efectivo_real::FLOAT, 
+        diferencia::FLOAT, 
+        observaciones;
+    `;
+
+    const result = await pool.query(queryStr, [
+      fecha,
+      cargado_por,
+      tVentas,
+      tEfectivo,
+      tTarjeta,
+      fApertura,
+      eReal,
+      dif,
+      observaciones || ''
+    ]);
+
+    res.json({
+      success: true,
+      message: 'Cuadrado de caja registrado con éxito.',
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error en POST /api/cierres:', err.message);
+    res.status(500).json({ success: false, message: 'Error al registrar el cierre de caja en la base de datos.' });
   }
 });
 

@@ -10,6 +10,34 @@ function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Estados para configuración de impresora
+  const [printers, setPrinters] = useState([]);
+  const [selectedPrinter, setSelectedPrinter] = useState('');
+
+  useEffect(() => {
+    if (window.electronAPI && typeof window.electronAPI.getPrinters === 'function') {
+      window.electronAPI.getPrinters().then(list => {
+        setPrinters(list || []);
+      }).catch(e => console.error('Error al listar impresoras:', e));
+
+      window.electronAPI.getSelectedPrinter().then(name => {
+        setSelectedPrinter(name || '');
+      }).catch(e => console.error('Error al obtener impresora seleccionada:', e));
+    }
+  }, []);
+
+  const handlePrinterChange = async (e) => {
+    const val = e.target.value;
+    setSelectedPrinter(val);
+    if (window.electronAPI && typeof window.electronAPI.setSelectedPrinter === 'function') {
+      try {
+        await window.electronAPI.setSelectedPrinter(val);
+      } catch (err) {
+        console.error('Error al guardar la impresora configurada:', err);
+      }
+    }
+  };
+
   useEffect(() => {
     if (isDark) {
       document.body.classList.add('dark-theme');
@@ -72,12 +100,20 @@ function App() {
   const [ingLoading, setIngLoading] = useState(false);
   const [editandoIngId, setEditandoIngId] = useState(null);
 
+  // Estados para llegada de materia prima
+  const [llegadaIngId, setLlegadaIngId] = useState('');
+  const [llegadaCantidad, setLlegadaCantidad] = useState('');
+  const [llegadaError, setLlegadaError] = useState('');
+  const [llegadaSuccess, setLlegadaSuccess] = useState('');
+  const [llegadaLoading, setLlegadaLoading] = useState(false);
+
   // Filtro de categorías en Catálogo POS
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('Todos');
 
   // Estados para creación dinámica de categorías
   const [listaCategorias, setListaCategorias] = useState([]);
   const [nuevaCategoriaNombre, setNuevaCategoriaNombre] = useState('');
+  const [nuevaCategoriaEmoji, setNuevaCategoriaEmoji] = useState('🏷️');
   const [catSuccess, setCatSuccess] = useState('');
   const [catError, setCatError] = useState('');
   const [editandoCatId, setEditandoCatId] = useState(null);
@@ -119,6 +155,14 @@ function App() {
   const [cierreData, setCierreData] = useState(null);
   const [loadingCierre, setLoadingCierre] = useState(false);
   const [errorCierre, setErrorCierre] = useState('');
+  
+  // Estados para Cuadrado de Caja (Arqueo)
+  const [fondoApertura, setFondoApertura] = useState(50000);
+  const [efectivoReal, setEfectivoReal] = useState('');
+  const [observacionesCierre, setObservacionesCierre] = useState('');
+  const [cierreRegistradoData, setCierreRegistradoData] = useState(null);
+  const [modoEdicionCierre, setModoEdicionCierre] = useState(false);
+  const [guardandoCierre, setGuardandoCierre] = useState(false);
 
   // Estado para alertas y confirmaciones personalizadas (reemplaza alert/confirm nativos de Electron)
   const [modalConfig, setModalConfig] = useState({
@@ -280,12 +324,16 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ nombre: nuevaCategoriaNombre.trim() }),
+        body: JSON.stringify({ 
+          nombre: nuevaCategoriaNombre.trim(),
+          emoji: nuevaCategoriaEmoji.trim() || '🏷️'
+        }),
       });
       const data = await response.json();
       if (response.ok && data.success) {
         setCatSuccess(data.message);
         setNuevaCategoriaNombre('');
+        setNuevaCategoriaEmoji('🏷️');
         cargarCategorias();
         setProdCategoria(data.categoria.nombre);
         setTimeout(() => {
@@ -303,6 +351,7 @@ function App() {
   const iniciarEdicionCat = (cat) => {
     setEditandoCatId(cat.id);
     setNuevaCategoriaNombre(cat.nombre);
+    setNuevaCategoriaEmoji(cat.emoji || '🏷️');
     setCatError('');
     setCatSuccess('');
   };
@@ -310,6 +359,7 @@ function App() {
   const cancelarEdicionCat = () => {
     setEditandoCatId(null);
     setNuevaCategoriaNombre('');
+    setNuevaCategoriaEmoji('🏷️');
     setCatError('');
     setCatSuccess('');
   };
@@ -329,12 +379,16 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ nombre: nuevaCategoriaNombre.trim() }),
+        body: JSON.stringify({ 
+          nombre: nuevaCategoriaNombre.trim(),
+          emoji: nuevaCategoriaEmoji.trim() || '🏷️'
+        }),
       });
       const data = await response.json();
       if (response.ok && data.success) {
         setCatSuccess(data.message);
         setNuevaCategoriaNombre('');
+        setNuevaCategoriaEmoji('🏷️');
         setEditandoCatId(null);
         await cargarCategorias();
         await cargarProductos();
@@ -367,6 +421,7 @@ function App() {
             if (editandoCatId === catId) {
               setEditandoCatId(null);
               setNuevaCategoriaNombre('');
+              setNuevaCategoriaEmoji('🏷️');
             }
             await cargarCategorias();
             await cargarProductos();
@@ -661,6 +716,48 @@ function App() {
     );
   };
 
+  const handleLlegadaMateriaPrima = async (e) => {
+    e.preventDefault();
+    if (!llegadaIngId) {
+      setLlegadaError('Selecciona un ingrediente.');
+      setLlegadaSuccess('');
+      return;
+    }
+    const cantNum = parseFloat(llegadaCantidad);
+    if (isNaN(cantNum) || cantNum <= 0) {
+      setLlegadaError('Ingresa una cantidad válida mayor que 0.');
+      setLlegadaSuccess('');
+      return;
+    }
+    setLlegadaError('');
+    setLlegadaSuccess('');
+    setLlegadaLoading(true);
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/ingredientes/${llegadaIngId}/llegada`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ cantidad: cantNum })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setLlegadaSuccess(data.message);
+        setLlegadaCantidad('');
+        setLlegadaIngId('');
+        await cargarIngredientes();
+        setTimeout(() => setLlegadaSuccess(''), 3000);
+      } else {
+        setLlegadaError(data.message || 'Error al registrar llegada de materia prima.');
+      }
+    } catch (err) {
+      console.error(err);
+      setLlegadaError('Error al conectar con el servidor.');
+    } finally {
+      setLlegadaLoading(false);
+    }
+  };
+
   // Intentar cargar la sesión del usuario si ya estaba logueado en esta ventana
   useEffect(() => {
     const savedUser = sessionStorage.getItem('calibre_session');
@@ -687,11 +784,36 @@ function App() {
   }, [user, activeTab]);
 
   useEffect(() => {
-    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario')) {
+    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre')) {
       cargarIngredientes();
       cargarCategorias();
     }
   }, [user, activeTab]);
+
+  const cargarCuadradoCaja = async (dateStr) => {
+    const targetDate = dateStr || fechaCierre;
+    if (!targetDate) return;
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/cierres/${targetDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        if (data.exists) {
+          setCierreRegistradoData(data.data);
+          setFondoApertura(data.data.fondo_apertura);
+          setEfectivoReal(data.data.efectivo_real.toString());
+          setObservacionesCierre(data.data.observaciones || '');
+          setModoEdicionCierre(false);
+        } else {
+          setCierreRegistradoData(null);
+          setEfectivoReal('');
+          setObservacionesCierre('');
+          setModoEdicionCierre(false);
+        }
+      }
+    } catch (err) {
+      console.error('Error al obtener arqueo de caja de la DB:', err);
+    }
+  };
 
   const cargarCierreCaja = async (dateStr) => {
     const targetDate = dateStr || fechaCierre;
@@ -703,6 +825,7 @@ function App() {
       const data = await response.json();
       if (response.ok && data.success) {
         setCierreData(data.data);
+        await cargarCuadradoCaja(targetDate);
       } else {
         setErrorCierre(data.message || 'Error al cargar el cierre de caja.');
       }
@@ -711,6 +834,54 @@ function App() {
       setErrorCierre('No se pudo conectar al servidor para obtener el cierre de caja.');
     } finally {
       setLoadingCierre(false);
+    }
+  };
+
+  const handleGuardarCuadradoCaja = async (e) => {
+    e.preventDefault();
+    if (!fechaCierre || !cierreData) return;
+    if (efectivoReal === '') {
+      abrirAlerta('Por favor, ingresa el efectivo real contado en caja.', 'Datos Incompletos');
+      return;
+    }
+    
+    const eRealNum = parseFloat(efectivoReal.toString().replace(',', '.'));
+    if (isNaN(eRealNum) || eRealNum < 0) {
+      abrirAlerta('El efectivo real debe ser un número válido mayor o igual a 0.', 'Valor Inválido');
+      return;
+    }
+
+    setGuardandoCierre(true);
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/cierres', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fecha: fechaCierre,
+          cargado_por: user.nombre,
+          total_ventas: cierreData.total_ventas,
+          total_efectivo: cierreData.total_efectivo,
+          total_tarjeta: cierreData.total_tarjeta,
+          fondo_apertura: parseFloat(fondoApertura.toString().replace(',', '.')) || 0,
+          efectivo_real: eRealNum,
+          observaciones: observacionesCierre
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setCierreRegistradoData(data.data);
+        setModoEdicionCierre(false);
+        abrirAlerta('El cuadrado de caja se ha guardado correctamente en la base de datos.', 'Éxito');
+      } else {
+        abrirAlerta(data.message || 'Error al guardar el cuadrado de caja.', 'Error');
+      }
+    } catch (err) {
+      console.error(err);
+      abrirAlerta(`Detalle del error: ${err.message}. Asegúrate de haber reiniciado el servidor backend para aplicar los cambios del arqueo de caja.`, 'Error de Conexión');
+    } finally {
+      setGuardandoCierre(false);
     }
   };
 
@@ -928,6 +1099,7 @@ function App() {
     setCategoriaSeleccionada('Todos');
     setListaCategorias([]);
     setNuevaCategoriaNombre('');
+    setNuevaCategoriaEmoji('🏷️');
     setCatSuccess('');
     setCatError('');
     setEditandoCatId(null);
@@ -1159,36 +1331,53 @@ function App() {
                     <p className="empty-catalog">No hay productos registrados en la base de datos.</p>
                   )}
 
-                  {/* Filtro de Categorías */}
-                  <div className="category-filters">
-                    {['Todos', ...listaCategorias.map(c => c.nombre)].map((cat) => (
-                      <button
-                        key={cat}
-                        onClick={() => setCategoriaSeleccionada(cat)}
-                        className={`category-filter-btn ${categoriaSeleccionada === cat ? 'active' : ''}`}
-                      >
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
+                  {/* Layout dividido estilo TPV (Itactil): Categorías a la izquierda, Productos a la derecha */}
+                  <div className="pos-catalog-layout">
+                    {/* Filtro de Categorías (Sidebar Izquierdo) */}
+                    <div className="category-sidebar">
+                      {['Todos', ...listaCategorias].map((cat) => {
+                        const isTodos = typeof cat === 'string';
+                        const nombre = isTodos ? 'Todos' : cat.nombre;
+                        const emoji = isTodos ? '🍽️' : (cat.emoji || '📁');
+                        
+                        return (
+                          <button
+                            key={nombre}
+                            onClick={() => setCategoriaSeleccionada(nombre)}
+                            className={`category-sidebar-btn ${categoriaSeleccionada === nombre ? 'active' : ''}`}
+                          >
+                            <span className="category-btn-icon">
+                              {emoji}
+                            </span>
+                            <span className="category-btn-text" title={nombre}>
+                              {nombre}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                  <div className="products-grid">
-                    {productos
-                      .filter((prod) => categoriaSeleccionada === 'Todos' || prod.categoria === categoriaSeleccionada)
-                      .map((prod) => (
-                      <div key={prod.id} className="product-card" onClick={() => agregarAlPedido(prod)}>
-                        <div className="product-emoji">{prod.imagen || '🍔'}</div>
-                        <div className="product-info">
-                          <h4 className="product-name">{prod.nombre}</h4>
-                          <span className="product-price">
-                             ${parseFloat(prod.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                          </span>
-                        </div>
-                        <button className="btn-add">
-                          <span>+</span>
-                        </button>
+                    {/* Contenedor de Productos (Derecha) */}
+                    <div className="products-container">
+                      <div className="products-grid">
+                        {productos
+                          .filter((prod) => categoriaSeleccionada === 'Todos' || prod.categoria === categoriaSeleccionada)
+                          .map((prod) => (
+                            <div key={prod.id} className="product-card" onClick={() => agregarAlPedido(prod)}>
+                              <div className="product-emoji">{prod.imagen || '🍔'}</div>
+                              <div className="product-info">
+                                <h4 className="product-name">{prod.nombre}</h4>
+                                <span className="product-price">
+                                   ${parseFloat(prod.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                </span>
+                              </div>
+                              <button className="btn-add">
+                                <span>+</span>
+                              </button>
+                            </div>
+                          ))}
                       </div>
-                    ))}
+                    </div>
                   </div>
                 </div>
 
@@ -1512,7 +1701,7 @@ function App() {
                           >
                             {listaCategorias.map(cat => (
                               <option key={cat.id} value={cat.nombre}>
-                                {cat.nombre}
+                                {cat.emoji || '🏷️'} {cat.nombre}
                               </option>
                             ))}
                           </select>
@@ -1721,6 +1910,32 @@ function App() {
                         </div>
                       </div>
 
+                      <div className="form-group" style={{ marginTop: '1rem' }}>
+                        <label className="form-label" htmlFor="nuevaCategoriaEmoji">
+                          Emoji de la Categoría
+                        </label>
+                        <div className="input-wrapper">
+                          <select
+                            id="nuevaCategoriaEmoji"
+                            className="form-input form-select"
+                            value={nuevaCategoriaEmoji}
+                            onChange={(e) => setNuevaCategoriaEmoji(e.target.value)}
+                          >
+                            <option value="🏷️">🏷️ Categoría / Etiqueta</option>
+                            <option value="🍔">🍔 Hamburguesas</option>
+                            <option value="🌭">🌭 Completos / Hot Dogs</option>
+                            <option value="🍟">🍟 Acompañamientos / Papas</option>
+                            <option value="🥤">🥤 Bebidas / Bebestibles</option>
+                            <option value="🍕">🍕 Pizzas</option>
+                            <option value="🌮">🌮 Tacos</option>
+                            <option value="🍦">🍦 Postres / Helados</option>
+                            <option value="🍗">🍗 Pollos / Carnes</option>
+                            <option value="🧅">🧅 Ensaladas / Verduras</option>
+                            <option value="🧀">🧀 Quesos / Aderezos</option>
+                          </select>
+                        </div>
+                      </div>
+
                       <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
                         {editandoCatId ? (
                           <>
@@ -1766,7 +1981,10 @@ function App() {
                       <div className="admin-categories-mini-list" style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         {listaCategorias.map((cat) => (
                           <div key={cat.id} className="admin-category-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 'var(--radius-md)' }}>
-                            <span className="admin-category-item-name" style={{ fontWeight: '500', color: 'var(--text-primary)' }}>{cat.nombre}</span>
+                            <span className="admin-category-item-name" style={{ fontWeight: '500', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span>{cat.emoji || '🏷️'}</span>
+                              <span>{cat.nombre}</span>
+                            </span>
                             <div className="admin-category-item-actions" style={{ display: 'flex', gap: '0.5rem' }}>
                               <button
                                 type="button"
@@ -2000,7 +2218,37 @@ function App() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', flex: 1, minHeight: 0, overflow: 'hidden' }}>
                     {/* Columna Izquierda: Cierre de Caja del Día */}
                     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
-                      <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📅 Cierre Diario</h4>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>📅 Cierre Diario</h4>
+                        {cierreData && window.electronAPI && (
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', height: '32px' }}
+                            onClick={() => {
+                              window.electronAPI.printReport({
+                                fecha: fechaCierre,
+                                total_ventas: cierreData.total_ventas,
+                                total_efectivo: cierreData.total_efectivo,
+                                total_debito: cierreData.total_debito,
+                                total_credito: cierreData.total_credito,
+                                total_tarjeta: cierreData.total_tarjeta,
+                                productos_vendidos: cierreData.productos_vendidos,
+                                ingredientes_gastados: cierreData.ingredientes_gastados,
+                                has_arqueo: !!cierreRegistradoData,
+                                cargado_por: cierreRegistradoData ? cierreRegistradoData.cargado_por : '',
+                                fondo_apertura: cierreRegistradoData ? cierreRegistradoData.fondo_apertura : 0,
+                                efectivo_real: cierreRegistradoData ? cierreRegistradoData.efectivo_real : 0,
+                                diferencia: cierreRegistradoData ? cierreRegistradoData.diferencia : 0,
+                                observaciones: cierreRegistradoData ? cierreRegistradoData.observaciones : '',
+                                inventario_actual: listaIngredientes
+                              });
+                            }}
+                          >
+                            🖨️ Imprimir Reporte
+                          </button>
+                        )}
+                      </div>
                       
                       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', alignItems: 'center' }}>
                         <label style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Fecha:</label>
@@ -2032,6 +2280,8 @@ function App() {
                         </div>
                       ) : cierreData ? (
                         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.25rem' }}>
+                          
+                          {/* Resumen de Ventas Calculado del Día */}
                           <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '1rem', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem' }}>
                               <span style={{ color: 'var(--text-secondary)' }}>Ventas Totales:</span>
@@ -2065,6 +2315,212 @@ function App() {
                               <strong>${cierreData.total_tarjeta.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
                             </div>
                           </div>
+
+                          {/* Desglose de Ventas y Consumo de Materia Prima (Junto al informe de ventas) */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                            {/* Productos Vendidos */}
+                            <div className="cierre-sub-card">
+                              <h5 className="cierre-sub-card-title">📦 Resumen de Ventas (Productos)</h5>
+                              {cierreData.productos_vendidos && cierreData.productos_vendidos.length > 0 ? (
+                                <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                  {cierreData.productos_vendidos.map((p, idx) => (
+                                    <div key={idx} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span className="cierre-item-name" style={{ flex: 1 }}>{p.nombre_producto}</span>
+                                      <span style={{ marginRight: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                        {p.cantidad_vendida} un.
+                                      </span>
+                                      <strong className="cierre-item-qty">
+                                        ${(p.total_pesos || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                      </strong>
+                                    </div>
+                                  ))}
+                                  <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '2px dashed var(--accent-primary)', paddingTop: '0.65rem', marginTop: '0.5rem', background: 'rgba(255, 255, 255, 0.06)', fontWeight: 'bold' }}>
+                                    <span className="cierre-item-name" style={{ fontWeight: '700' }}>Total Productos:</span>
+                                    <strong style={{ color: 'var(--accent-primary)', fontSize: '0.98rem' }}>
+                                      ${cierreData.productos_vendidos.reduce((acc, curr) => acc + (curr.total_pesos || 0), 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                    </strong>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="cierre-empty-text">No hay productos vendidos en esta fecha.</p>
+                              )}
+                            </div>
+
+                            {/* Materia Prima Gastada */}
+                            <div className="cierre-sub-card">
+                              <h5 className="cierre-sub-card-title">🥑 Consumo Estimado de Materia Prima</h5>
+                              {cierreData.ingredientes_gastados && cierreData.ingredientes_gastados.length > 0 ? (
+                                <div className="cierre-list">
+                                  {cierreData.ingredientes_gastados.map((ing, idx) => (
+                                    <div key={idx} className="cierre-list-item">
+                                      <span className="cierre-item-name">{ing.ingrediente_nombre}</span>
+                                      <strong className="cierre-item-qty">{parseFloat(ing.cantidad_gastada).toLocaleString('es-CL', { maximumFractionDigits: 2 })}</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="cierre-empty-text">No hay consumo de materia prima registrado hoy.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* SECCIÓN CUADRADO DE CAJA (Al final del informe) */}
+                          {cierreRegistradoData && !modoEdicionCierre ? (
+                            /* Vista: Caja ya cuadrada */
+                            <div className="cierre-registrado-card">
+                              <h5 className="cierre-card-title">✅ Caja Cuadrada para este Día</h5>
+                              
+                              <div className="cierre-card-details">
+                                <div className="cierre-card-row">
+                                  <span>Cerrado por:</span>
+                                  <strong>{cierreRegistradoData.cargado_por}</strong>
+                                </div>
+                                <div className="cierre-card-row">
+                                  <span>Fondo Inicial:</span>
+                                  <strong>${cierreRegistradoData.fondo_apertura.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                                </div>
+                                <div className="cierre-card-row">
+                                  <span>Efectivo Ventas:</span>
+                                  <strong>${cierreRegistradoData.total_efectivo.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                                </div>
+                                <div className="cierre-card-row highlighted-row">
+                                  <span>Efectivo Esperado:</span>
+                                  <strong>${(cierreRegistradoData.total_efectivo + cierreRegistradoData.fondo_apertura).toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                                </div>
+                                <div className="cierre-card-row highlighted-row">
+                                  <span>Efectivo Real en Caja:</span>
+                                  <strong>${cierreRegistradoData.efectivo_real.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                                </div>
+                                
+                                <div className={`cierre-card-row result-row ${cierreRegistradoData.diferencia === 0 ? 'status-ok' : cierreRegistradoData.diferencia > 0 ? 'status-surplus' : 'status-shortage'}`}>
+                                  <span>Diferencia:</span>
+                                  <strong>
+                                    {cierreRegistradoData.diferencia === 0 
+                                      ? 'Caja Cuadrada ($0)' 
+                                      : `${cierreRegistradoData.diferencia > 0 ? 'Sobrante (+$' : 'Faltante (-$'}${Math.abs(cierreRegistradoData.diferencia).toLocaleString('es-CL', { minimumFractionDigits: 0 })}`}
+                                  </strong>
+                                </div>
+
+                                {cierreRegistradoData.observaciones && (
+                                  <div className="cierre-card-obs">
+                                    <span>Observaciones:</span>
+                                    <p>{cierreRegistradoData.observaciones}</p>
+                                  </div>
+                                )}
+                              </div>
+
+                              <button 
+                                type="button" 
+                                className="btn-secondary" 
+                                style={{ marginTop: '0.75rem', width: '100%' }}
+                                onClick={() => setModoEdicionCierre(true)}
+                              >
+                                ✏️ Corregir Arqueo
+                              </button>
+                            </div>
+                          ) : (
+                            /* Vista: Formulario de Arqueo */
+                            <form onSubmit={handleGuardarCuadradoCaja} className="cierre-form-card">
+                              <h5 className="cierre-card-title">🔐 Realizar Arqueo (Cuadrado de Caja)</h5>
+                              
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
+                                <div className="cierre-form-field">
+                                  <label>💵 Fondo Inicial de Caja (Apertura):</label>
+                                  <input 
+                                    type="number" 
+                                    className="form-input" 
+                                    value={fondoApertura} 
+                                    onChange={(e) => setFondoApertura(e.target.value)}
+                                    placeholder="Ej: 50000"
+                                    style={{ height: '36px', color: 'var(--text-primary)' }}
+                                  />
+                                </div>
+
+                                <div className="cierre-form-field">
+                                  <label>💰 Efectivo Real en Caja (Contado):</label>
+                                  <input 
+                                    type="number" 
+                                    className="form-input" 
+                                    value={efectivoReal} 
+                                    onChange={(e) => setEfectivoReal(e.target.value)}
+                                    placeholder="Ingresa el monto total contado"
+                                    style={{ height: '36px', color: 'var(--text-primary)' }}
+                                  />
+                                </div>
+
+                                <div className="cierre-form-field">
+                                  <label>📝 Observaciones / Notas:</label>
+                                  <textarea 
+                                    className="form-input" 
+                                    value={observacionesCierre} 
+                                    onChange={(e) => setObservacionesCierre(e.target.value)}
+                                    placeholder="Nota opcional (ej: retiro de sencillo, descuadre de vuelto)"
+                                    style={{ height: '60px', color: 'var(--text-primary)', padding: '0.5rem', resize: 'none' }}
+                                  />
+                                </div>
+
+                                {/* Resumen y cálculo de diferencia en tiempo real */}
+                                {(() => {
+                                  const fAperturaNum = parseFloat(fondoApertura) || 0;
+                                  const eRealNum = parseFloat(efectivoReal) || 0;
+                                  const eEsperadoNum = (cierreData.total_efectivo || 0) + fAperturaNum;
+                                  const difNum = eRealNum - eEsperadoNum;
+
+                                  return (
+                                    <div className="cierre-live-summary">
+                                      <div className="live-row">
+                                        <span>Efectivo Esperado:</span>
+                                        <strong>${eEsperadoNum.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                                      </div>
+                                      <div className="live-row">
+                                        <span>Efectivo Declarado:</span>
+                                        <strong>${eRealNum.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                                      </div>
+                                      <div className={`live-row live-difference ${efectivoReal === '' ? '' : difNum === 0 ? 'status-ok' : difNum > 0 ? 'status-surplus' : 'status-shortage'}`}>
+                                        <span>Diferencia:</span>
+                                        <strong>
+                                          {efectivoReal === '' 
+                                            ? 'Por calcular' 
+                                            : difNum === 0 
+                                              ? 'Cuadrado ($0)' 
+                                              : `${difNum > 0 ? 'Sobrante (+$' : 'Faltante (-$'}${Math.abs(difNum).toLocaleString('es-CL', { minimumFractionDigits: 0 })}`}
+                                        </strong>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+
+                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                                  {modoEdicionCierre && (
+                                    <button 
+                                      type="button" 
+                                      className="btn-secondary" 
+                                      style={{ flex: 1, height: '40px' }}
+                                      onClick={() => {
+                                        setModoEdicionCierre(false);
+                                        // Restablecer valores originales si se cancela
+                                        if (cierreRegistradoData) {
+                                          setFondoApertura(cierreRegistradoData.fondo_apertura);
+                                          setEfectivoReal(cierreRegistradoData.efectivo_real.toString());
+                                          setObservacionesCierre(cierreRegistradoData.observaciones);
+                                        }
+                                      }}
+                                    >
+                                      Cancelar
+                                    </button>
+                                  )}
+                                  <button 
+                                    type="submit" 
+                                    className="btn-primary" 
+                                    style={{ flex: 2, height: '40px', background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', boxShadow: 'none' }}
+                                    disabled={guardandoCierre}
+                                  >
+                                    {guardandoCierre ? 'Guardando...' : modoEdicionCierre ? 'Actualizar Arqueo' : 'Finalizar Arqueo'}
+                                  </button>
+                                </div>
+                              </div>
+                            </form>
+                          )}
                         </div>
                       ) : (
                         <p style={{ color: 'var(--text-muted)' }}>Selecciona una fecha para visualizar el cierre.</p>
@@ -2144,6 +2600,47 @@ function App() {
                           </button>
                         </div>
                       </div>
+
+                      {/* Configuración de Impresora */}
+                      {window.electronAPI && (
+                        <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                          <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            🖨️ Impresora de Comandas
+                          </h4>
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+                            Selecciona la impresora que se utilizará para imprimir automáticamente las comandas de cocina y los reportes de cierre de caja.
+                          </p>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <select 
+                              value={selectedPrinter} 
+                              onChange={handlePrinterChange}
+                              className="form-input"
+                              style={{ 
+                                padding: '0.5rem 1rem', 
+                                fontSize: '0.95rem', 
+                                height: '38px', 
+                                color: 'var(--text-primary)', 
+                                background: 'var(--input-bg)',
+                                border: '1px solid var(--glass-border)',
+                                borderRadius: '12px',
+                                width: '100%',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <option value="">Predeterminada del Sistema</option>
+                              {printers.map(p => (
+                                <option key={p.name} value={p.name}>
+                                  {p.name}
+                                </option>
+                              ))}
+                            </select>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                              Impresora configurada actualmente: <strong>{selectedPrinter || 'Predeterminada'}</strong>
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2159,71 +2656,136 @@ function App() {
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '2rem', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                    {/* Columna Izquierda: Formulario de Registro/Edición */}
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
-                      <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>
-                        {editandoIngId ? '✏️ Editar Ingrediente' : '➕ Nuevo Ingrediente'}
-                      </h4>
+                    {/* Columna Izquierda: Formularios de Registro/Edición y Entrada de Stock */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: '100%', minHeight: 0, overflowY: 'auto' }}>
+                      
+                      {/* Registro/Edición */}
+                      <div style={{ background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.25rem', color: 'var(--text-primary)' }}>
+                          {editandoIngId ? '✏️ Editar Ingrediente' : '➕ Nuevo Ingrediente'}
+                        </h4>
 
-                      {ingError && (
-                        <div className="alert alert-error" style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem' }}>
-                          <span>{ingError}</span>
-                        </div>
-                      )}
-                      {ingSuccess && (
-                        <div className="alert alert-success" style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem' }}>
-                          <span>{ingSuccess}</span>
-                        </div>
-                      )}
-
-                      <form onSubmit={editandoIngId ? handleUpdateIngredient : handleCreateIngredient} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Nombre del Ingrediente</label>
-                          <div className="input-wrapper">
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder="Ej. Carne de Res (gramos)"
-                              value={ingNombre}
-                              onChange={(e) => setIngNombre(e.target.value)}
-                              disabled={ingLoading}
-                            />
-                            <span className="input-icon">🥑</span>
+                        {ingError && (
+                          <div className="alert alert-error" style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem' }}>
+                            <span>{ingError}</span>
                           </div>
-                        </div>
-
-                        <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label className="form-label">Stock Actual (Cantidad)</label>
-                          <div className="input-wrapper">
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder="Ej. 1000"
-                              value={ingStock}
-                              onChange={(e) => setIngStock(e.target.value)}
-                              disabled={ingLoading}
-                            />
-                            <span className="input-icon">📦</span>
+                        )}
+                        {ingSuccess && (
+                          <div className="alert alert-success" style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem' }}>
+                            <span>{ingSuccess}</span>
                           </div>
-                        </div>
+                        )}
 
-                        <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                          {editandoIngId ? (
-                            <>
-                              <button type="submit" className="btn-primary" style={{ flex: 1 }} disabled={ingLoading}>
-                                Guardar
+                        <form onSubmit={editandoIngId ? handleUpdateIngredient : handleCreateIngredient} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Nombre del Ingrediente</label>
+                            <div className="input-wrapper">
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="Ej. Carne de Res (gramos)"
+                                value={ingNombre}
+                                onChange={(e) => setIngNombre(e.target.value)}
+                                disabled={ingLoading}
+                              />
+                              <span className="input-icon">🥑</span>
+                            </div>
+                          </div>
+
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Stock Actual (Cantidad)</label>
+                            <div className="input-wrapper">
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="Ej. 1000"
+                                value={ingStock}
+                                onChange={(e) => setIngStock(e.target.value)}
+                                disabled={ingLoading}
+                              />
+                              <span className="input-icon">📦</span>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+                            {editandoIngId ? (
+                              <>
+                                <button type="submit" className="btn-primary" style={{ flex: 1 }} disabled={ingLoading}>
+                                  Guardar
+                                </button>
+                                <button type="button" onClick={cancelarEdicionIng} className="btn-secondary" style={{ flex: 1 }} disabled={ingLoading}>
+                                  Cancelar
+                                </button>
+                              </>
+                            ) : (
+                              <button type="submit" className="btn-primary" style={{ width: '100%' }} disabled={ingLoading}>
+                                {ingLoading ? 'Registrando...' : 'Registrar Ingrediente'}
                               </button>
-                              <button type="button" onClick={cancelarEdicionIng} className="btn-secondary" style={{ flex: 1 }} disabled={ingLoading}>
-                                Cancelar
-                              </button>
-                            </>
-                          ) : (
-                            <button type="submit" className="btn-primary" style={{ width: '100%' }} disabled={ingLoading}>
-                              {ingLoading ? 'Registrando...' : 'Registrar Ingrediente'}
-                            </button>
-                          )}
-                        </div>
-                      </form>
+                            )}
+                          </div>
+                        </form>
+                      </div>
+
+                      {/* Llegada de Materia Prima */}
+                      <div style={{ background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.25rem', color: 'var(--text-primary)' }}>
+                          📦 Llegada de Materia Prima
+                        </h4>
+
+                        {llegadaError && (
+                          <div className="alert alert-error" style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem' }}>
+                            <span>{llegadaError}</span>
+                          </div>
+                        )}
+                        {llegadaSuccess && (
+                          <div className="alert alert-success" style={{ marginBottom: '0.5rem', padding: '0.5rem 0.75rem' }}>
+                            <span>{llegadaSuccess}</span>
+                          </div>
+                        )}
+
+                        <form onSubmit={handleLlegadaMateriaPrima} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Seleccionar Materia Prima</label>
+                            <div className="input-wrapper">
+                              <select
+                                className="form-input form-select"
+                                value={llegadaIngId}
+                                onChange={(e) => setLlegadaIngId(e.target.value)}
+                                disabled={llegadaLoading}
+                                style={{ color: 'var(--text-primary)', background: 'var(--input-bg)' }}
+                              >
+                                <option value="">-- Selecciona un ingrediente --</option>
+                                {listaIngredientes.map((ing) => (
+                                  <option key={ing.id} value={ing.id}>
+                                    {ing.nombre} (actual: {parseFloat(ing.stock)})
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label">Cantidad que Llegó</label>
+                            <div className="input-wrapper">
+                              <input
+                                type="number"
+                                step="any"
+                                className="form-input"
+                                placeholder="Ej. 500"
+                                value={llegadaCantidad}
+                                onChange={(e) => setLlegadaCantidad(e.target.value)}
+                                disabled={llegadaLoading}
+                              />
+                              <span className="input-icon">➕</span>
+                            </div>
+                          </div>
+
+                          <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: '0.5rem' }} disabled={llegadaLoading}>
+                            {llegadaLoading ? 'Registrando...' : 'Registrar Ingreso'}
+                          </button>
+                        </form>
+                      </div>
+
                     </div>
 
                     {/* Columna Derecha: Tabla de Ingredientes y cantidades */}

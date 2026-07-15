@@ -31,6 +31,7 @@ const setup = async () => {
         nombre VARCHAR(100) UNIQUE NOT NULL
       );
     `);
+    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🏷️'");
 
     const resCat = await pool.query('SELECT COUNT(*) FROM categorias');
     if (parseInt(resCat.rows[0].count) === 0) {
