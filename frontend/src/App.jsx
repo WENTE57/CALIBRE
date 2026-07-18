@@ -48,6 +48,64 @@ function App() {
     }
   }, [isDark]);
 
+  // Efecto para cambiar de campo al presionar ENTER en lugar de enviar el formulario
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Enter') {
+        const target = e.target;
+        if (
+          target.tagName === 'INPUT' &&
+          target.type !== 'submit' &&
+          target.type !== 'button' &&
+          target.type !== 'checkbox' &&
+          target.type !== 'radio' &&
+          target.type !== 'file'
+        ) {
+          // Evitar el envío automático del formulario
+          e.preventDefault();
+
+          const form = target.form;
+          if (form) {
+            // Obtener todos los elementos interactivos del formulario
+            const elements = Array.from(form.elements).filter((el) => {
+              return (
+                (el.tagName === 'INPUT' ||
+                  el.tagName === 'SELECT' ||
+                  el.tagName === 'TEXTAREA' ||
+                  el.tagName === 'BUTTON') &&
+                !el.disabled &&
+                el.type !== 'hidden' &&
+                el.tabIndex !== -1 &&
+                el.offsetWidth > 0 &&
+                el.offsetHeight > 0
+              );
+            });
+
+            const index = elements.indexOf(target);
+            if (index > -1 && index < elements.length - 1) {
+              const nextEl = elements[index + 1];
+              nextEl.focus();
+              if (
+                nextEl.tagName === 'INPUT' &&
+                (nextEl.type === 'text' || nextEl.type === 'number' || nextEl.type === 'password')
+              ) {
+                nextEl.select?.();
+              }
+            } else if (index === elements.length - 1) {
+              // Si es el último campo de texto, permitimos que se envíe el formulario
+              form.requestSubmit?.();
+            }
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   // Estados para creación de usuario
   const [regNombre, setRegNombre] = useState('');
   const [regContrasena, setRegContrasena] = useState('');
@@ -117,6 +175,8 @@ function App() {
   const [catSuccess, setCatSuccess] = useState('');
   const [catError, setCatError] = useState('');
   const [editandoCatId, setEditandoCatId] = useState(null);
+  const [selectedCatForProducts, setSelectedCatForProducts] = useState(null);
+  const [catProductView, setCatProductView] = useState('list'); // 'list', 'create', 'edit'
 
   // Estados para búsqueda en historial
   const [filtroTicketId, setFiltroTicketId] = useState('');
@@ -294,6 +354,37 @@ function App() {
     );
   };
 
+  const handleIngredientesKeyDown = (e, currentFieldName) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const container = e.currentTarget.closest('.ingredients-selector-row');
+      if (!container) return;
+
+      const selectEl = container.querySelector('.ingrediente-select');
+      const qtyEl = container.querySelector('.ingrediente-cantidad-input');
+      const btnEl = container.querySelector('.btn-add-ingredient');
+
+      if (e.key === 'ArrowRight') {
+        if (currentFieldName === 'select' && qtyEl) {
+          e.preventDefault();
+          qtyEl.focus();
+          qtyEl.select?.();
+        } else if (currentFieldName === 'quantity' && btnEl) {
+          e.preventDefault();
+          btnEl.focus();
+        }
+      } else if (e.key === 'ArrowLeft') {
+        if (currentFieldName === 'quantity' && selectEl) {
+          e.preventDefault();
+          selectEl.focus();
+        } else if (currentFieldName === 'button' && qtyEl) {
+          e.preventDefault();
+          qtyEl.focus();
+          qtyEl.select?.();
+        }
+      }
+    }
+  };
+
   const cargarCategorias = async () => {
     try {
       const response = await fetch('http://127.0.0.1:5000/api/categorias');
@@ -349,6 +440,8 @@ function App() {
   };
 
   const iniciarEdicionCat = (cat) => {
+    setSelectedCatForProducts(null);
+    setCatProductView('list');
     setEditandoCatId(cat.id);
     setNuevaCategoriaNombre(cat.nombre);
     setNuevaCategoriaEmoji(cat.emoji || '🏷️');
@@ -423,6 +516,8 @@ function App() {
               setNuevaCategoriaNombre('');
               setNuevaCategoriaEmoji('🏷️');
             }
+            setSelectedCatForProducts(null);
+            setCatProductView('list');
             await cargarCategorias();
             await cargarProductos();
             setTimeout(() => {
@@ -515,12 +610,19 @@ function App() {
         setProdNombre('');
         setProdPrecio('');
         setProdImagen('🍔');
-        setProdCategoria(listaCategorias[0]?.nombre || '');
+        if (activeTab === 'categorias' && selectedCatForProducts) {
+          setProdCategoria(selectedCatForProducts.nombre);
+        } else {
+          setProdCategoria(listaCategorias[0]?.nombre || '');
+        }
         setIngredientesSeleccionados([]);
         setCurrIngredienteId('');
         setCurrIngredienteCantidad('');
         setEditandoProdId(null);
         cargarProductos();
+        if (activeTab === 'categorias') {
+          setCatProductView('list');
+        }
       } else {
         setProdError(data.message || (editandoProdId ? 'Error al actualizar el producto.' : 'Error al crear el producto.'));
       }
@@ -787,8 +889,14 @@ function App() {
     if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre')) {
       cargarIngredientes();
       cargarCategorias();
+      cargarProductos();
     }
   }, [user, activeTab]);
+
+  useEffect(() => {
+    setSelectedCatForProducts(null);
+    setCatProductView('list');
+  }, [activeTab]);
 
   const cargarCuadradoCaja = async (dateStr) => {
     const targetDate = dateStr || fechaCierre;
@@ -1718,6 +1826,7 @@ function App() {
                             value={currIngredienteId}
                             onChange={(e) => setCurrIngredienteId(e.target.value)}
                             disabled={prodLoading}
+                            onKeyDown={(e) => handleIngredientesKeyDown(e, 'select')}
                           >
                             <option value="">-- Seleccionar Ingrediente --</option>
                             {listaIngredientes.map((ing) => (
@@ -1734,12 +1843,14 @@ function App() {
                             value={currIngredienteCantidad}
                             onChange={(e) => setCurrIngredienteCantidad(e.target.value)}
                             disabled={prodLoading}
+                            onKeyDown={(e) => handleIngredientesKeyDown(e, 'quantity')}
                           />
                           <button
                             type="button"
                             onClick={agregarIngredienteAlForm}
                             className="btn-secondary btn-add-ingredient"
                             disabled={prodLoading}
+                            onKeyDown={(e) => handleIngredientesKeyDown(e, 'button')}
                           >
                             + Agregar
                           </button>
@@ -1866,121 +1977,462 @@ function App() {
             {activeTab === 'categorias' && user.cargo.toLowerCase() === 'administrador' && (
               <div className="admin-tab-content animate-fade">
                 <div className="admin-grid-layout">
-                  {/* Formulario de creación/edición */}
-                  <div className="admin-section">
-                    <h3 className="section-title">🏷️ Registrar Categoría</h3>
-                    <p className="section-subtitle">Crea, edita o elimina las categorías del catálogo</p>
-                    
-                    {catError && (
-                      <div className="alert alert-error">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10"></circle>
-                          <line x1="12" y1="8" x2="12" y2="12"></line>
-                          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                        </svg>
-                        <span>{catError}</span>
-                      </div>
-                    )}
-                    {catSuccess && (
-                      <div className="alert alert-success">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                          <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                        </svg>
-                        <span>{catSuccess}</span>
-                      </div>
-                    )}
-
-                    <form onSubmit={(e) => e.preventDefault()} className="admin-form">
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="nuevaCategoriaNombre">
-                          {editandoCatId ? '✏️ Editar Nombre de Categoría' : 'Nombre de la Categoría'}
-                        </label>
-                        <div className="input-wrapper">
-                          <input
-                            type="text"
-                            id="nuevaCategoriaNombre"
-                            className="form-input"
-                            style={{ paddingLeft: '2.5rem' }}
-                            placeholder="Ej. Postres"
-                            value={nuevaCategoriaNombre}
-                            onChange={(e) => setNuevaCategoriaNombre(e.target.value)}
-                          />
-                          <span className="input-icon">🏷️</span>
-                        </div>
-                      </div>
-
-                      <div className="form-group" style={{ marginTop: '1rem' }}>
-                        <label className="form-label" htmlFor="nuevaCategoriaEmoji">
-                          Emoji de la Categoría
-                        </label>
-                        <div className="input-wrapper">
-                          <select
-                            id="nuevaCategoriaEmoji"
-                            className="form-input form-select"
-                            value={nuevaCategoriaEmoji}
-                            onChange={(e) => setNuevaCategoriaEmoji(e.target.value)}
-                          >
-                            <option value="🏷️">🏷️ Categoría / Etiqueta</option>
-                            <option value="🍔">🍔 Hamburguesas</option>
-                            <option value="🌭">🌭 Completos / Hot Dogs</option>
-                            <option value="🍟">🍟 Acompañamientos / Papas</option>
-                            <option value="🥤">🥤 Bebidas / Bebestibles</option>
-                            <option value="🍕">🍕 Pizzas</option>
-                            <option value="🌮">🌮 Tacos</option>
-                            <option value="🍦">🍦 Postres / Helados</option>
-                            <option value="🍗">🍗 Pollos / Carnes</option>
-                            <option value="🧅">🧅 Ensaladas / Verduras</option>
-                            <option value="🧀">🧀 Quesos / Aderezos</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
-                        {editandoCatId ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={handleUpdateCategory}
-                              className="btn-primary"
-                              style={{ flex: 1 }}
+                  {/* Formulario de creación/edición o Lista/Formulario de productos de la categoría seleccionada */}
+                  {selectedCatForProducts ? (
+                    <div className="admin-section">
+                      {catProductView === 'list' ? (
+                        <>
+                          <div className="admin-section-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <div>
+                              <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span>{selectedCatForProducts.emoji || '🏷️'}</span>
+                                <span>{selectedCatForProducts.nombre}</span>
+                              </h3>
+                              <p className="section-subtitle">Productos en esta categoría</p>
+                            </div>
+                            <button 
+                              type="button" 
+                              className="btn-secondary" 
+                              style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                              onClick={() => {
+                                setSelectedCatForProducts(null);
+                                setCatProductView('list');
+                                setProdError('');
+                                setProdSuccess('');
+                              }}
                             >
-                              Guardar
+                              👈 Volver
                             </button>
-                            <button
-                              type="button"
-                              onClick={cancelarEdicionCat}
-                              className="btn-secondary"
-                              style={{ flex: 1 }}
-                            >
-                              Cancelar
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={handleCreateCategory}
-                            className="btn-primary"
-                            style={{ width: '100%' }}
+                          </div>
+
+                          {prodSuccess && (
+                            <div className="alert alert-success" style={{ marginBottom: '1rem' }}>
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                              </svg>
+                              <span>{prodSuccess}</span>
+                            </div>
+                          )}
+                          {prodError && (
+                            <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                              </svg>
+                              <span>{prodError}</span>
+                            </div>
+                          )}
+
+                          <button 
+                            type="button" 
+                            className="btn-primary" 
+                            style={{ width: '100%', marginBottom: '1rem', display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                            onClick={() => {
+                              setProdNombre('');
+                              setProdPrecio('');
+                              setProdImagen('🍔');
+                              setProdCategoria(selectedCatForProducts.nombre);
+                              setIngredientesSeleccionados([]);
+                              setCurrIngredienteId('');
+                              setCurrIngredienteCantidad('');
+                              setEditandoProdId(null);
+                              setProdError('');
+                              setProdSuccess('');
+                              setCatProductView('create');
+                            }}
                           >
-                            Crear Categoría
+                            <span>➕ Registrar Producto en {selectedCatForProducts.nombre}</span>
                           </button>
-                        )}
-                      </div>
-                    </form>
-                  </div>
+
+                          <div className="users-list-container" style={{ flex: 1, overflowY: 'auto' }}>
+                            {productos.filter(p => p.categoria === selectedCatForProducts.nombre).length === 0 ? (
+                              <p className="empty-catalog" style={{ textAlign: 'center', marginTop: '2rem' }}>
+                                No hay productos en esta categoría.
+                              </p>
+                            ) : (
+                              productos
+                                .filter(p => p.categoria === selectedCatForProducts.nombre)
+                                .map(p => (
+                                  <div key={p.id} className="user-list-item" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '0.75rem 1rem' }}>
+                                    <div className="user-list-info" style={{ flexGrow: 1 }}>
+                                      <span className="user-list-name">
+                                        {p.imagen || '🍔'} {p.nombre}
+                                      </span>
+                                      {p.ingredientes && p.ingredientes.length > 0 && (
+                                        <div className="product-list-ingredients" style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                                          <span className="ingredients-label">Ingredientes:</span>{' '}
+                                          {p.ingredientes.map(ing => `${ing.nombre} (${ing.cantidad})`).join(', ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                      <span className="badge" style={{ fontSize: '0.8rem' }}>
+                                        ${parseFloat(p.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          iniciarEdicionProd(p);
+                                          setProdError('');
+                                          setProdSuccess('');
+                                          setCatProductView('edit');
+                                        }}
+                                        className="btn-edit-user"
+                                        title="Editar producto"
+                                        style={{ padding: '0.2rem 0.4rem', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                                      >
+                                        ✏️
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteProduct(p.id, p.nombre)}
+                                        className="btn-delete-user"
+                                        title="Eliminar producto"
+                                        style={{ padding: '0.2rem 0.4rem', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        /* Formulario de Agregar / Editar Producto en la Categoría */
+                        <>
+                          <div className="admin-section-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <div>
+                              <h3 className="section-title">
+                                {catProductView === 'create' ? '➕ Registrar Producto' : '✏️ Editar Producto'}
+                              </h3>
+                              <p className="section-subtitle">
+                                Categoría: {selectedCatForProducts.emoji || '🏷️'} {selectedCatForProducts.nombre}
+                              </p>
+                            </div>
+                            <button 
+                              type="button" 
+                              className="btn-secondary" 
+                              style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                              onClick={() => {
+                                cancelarEdicionProd();
+                                setCatProductView('list');
+                              }}
+                            >
+                              👈 Cancelar
+                            </button>
+                          </div>
+
+                          {prodError && (
+                            <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                              </svg>
+                              <span>{prodError}</span>
+                            </div>
+                          )}
+                          {prodSuccess && (
+                            <div className="alert alert-success" style={{ marginBottom: '1rem' }}>
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                              </svg>
+                              <span>{prodSuccess}</span>
+                            </div>
+                          )}
+
+                          <form onSubmit={handleRegisterProduct} className="admin-form">
+                            <div className="form-group">
+                              <label className="form-label" htmlFor="catProdNombre">Nombre del Producto</label>
+                              <div className="input-wrapper">
+                                <input
+                                  type="text"
+                                  id="catProdNombre"
+                                  className="form-input"
+                                  placeholder="Ej. Hamburguesa Doble"
+                                  value={prodNombre}
+                                  onChange={(e) => setProdNombre(e.target.value)}
+                                  disabled={prodLoading}
+                                />
+                                <span className="input-icon">🍔</span>
+                              </div>
+                            </div>
+                            
+                            <div className="form-group">
+                              <label className="form-label" htmlFor="catProdPrecio">Precio ($)</label>
+                              <div className="input-wrapper">
+                                <input
+                                  type="number"
+                                  id="catProdPrecio"
+                                  className="form-input"
+                                  placeholder="Ej. 5500"
+                                  value={prodPrecio}
+                                  onChange={(e) => setProdPrecio(e.target.value)}
+                                  disabled={prodLoading}
+                                />
+                                <span className="input-icon">💲</span>
+                              </div>
+                            </div>
+
+                            <div className="form-group">
+                              <label className="form-label" htmlFor="catProdImagen">Emoji Representativo</label>
+                              <div className="input-wrapper">
+                                <select
+                                  id="catProdImagen"
+                                  className="form-input form-select"
+                                  value={prodImagen}
+                                  onChange={(e) => setProdImagen(e.target.value)}
+                                  disabled={prodLoading}
+                                >
+                                  <option value="🍔">🍔 Hamburguesa</option>
+                                  <option value="🧀">🧀 Queso / Cheeseburger</option>
+                                  <option value="🍟">🍟 Papas Fritas</option>
+                                  <option value="🥤">🥤 Bebida</option>
+                                  <option value="🧅">🧅 Aros de Cebolla</option>
+                                  <option value="🍕">🍕 Pizza</option>
+                                  <option value="🌮">🌮 Taco</option>
+                                  <option value="🌭">🌭 Hot Dog / Completo</option>
+                                  <option value="🍦">🍦 Helado</option>
+                                  <option value="🍗">🍗 Pollo Frito</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="form-group">
+                              <label className="form-label">Ingredientes del Producto</label>
+                              <div className="ingredients-selector-row" style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                                <select
+                                  className="form-input form-select ingrediente-select"
+                                  style={{ flex: 1 }}
+                                  value={currIngredienteId}
+                                  onChange={(e) => setCurrIngredienteId(e.target.value)}
+                                  disabled={prodLoading}
+                                  onKeyDown={(e) => handleIngredientesKeyDown(e, 'select')}
+                                >
+                                  <option value="">-- Seleccionar --</option>
+                                  {listaIngredientes.map((ing) => (
+                                    <option key={ing.id} value={ing.id}>
+                                      {ing.nombre}
+                                    </option>
+                                  ))}
+                                </select>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  className="form-input ingrediente-cantidad-input"
+                                  style={{ width: '80px' }}
+                                  placeholder="Cant."
+                                  value={currIngredienteCantidad}
+                                  onChange={(e) => setCurrIngredienteCantidad(e.target.value)}
+                                  disabled={prodLoading}
+                                  onKeyDown={(e) => handleIngredientesKeyDown(e, 'quantity')}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={agregarIngredienteAlForm}
+                                  className="btn-secondary btn-add-ingredient"
+                                  style={{ padding: '0.5rem' }}
+                                  disabled={prodLoading}
+                                  onKeyDown={(e) => handleIngredientesKeyDown(e, 'button')}
+                                >
+                                  +
+                                </button>
+                              </div>
+
+                              {ingredientesSeleccionados.length > 0 && (
+                                <div className="selected-ingredients-container" style={{ background: 'rgba(0,0,0,0.15)', padding: '0.5rem', borderRadius: '8px' }}>
+                                  <span className="selected-title" style={{ fontSize: '0.8rem', display: 'block', marginBottom: '0.25rem' }}>Seleccionados:</span>
+                                  <div className="selected-ingredients-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                                    {ingredientesSeleccionados.map((ing) => (
+                                      <span key={ing.ingrediente_id} className="selected-ingredient-badge" style={{ fontSize: '0.75rem', padding: '0.15rem 0.4rem', background: 'rgba(255,255,255,0.08)', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                        {ing.nombre}: <strong>{ing.cantidad}</strong>
+                                        <button
+                                          type="button"
+                                          onClick={() => quitarIngredienteDelForm(ing.ingrediente_id)}
+                                          className="btn-remove-badge"
+                                          style={{ border: 'none', background: 'transparent', color: 'var(--error)', cursor: 'pointer', fontSize: '0.85rem' }}
+                                          title="Quitar ingrediente"
+                                        >
+                                          &times;
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+                              <button type="submit" className="btn-primary" style={{ flex: 1 }} disabled={prodLoading}>
+                                {prodLoading ? (
+                                  <>
+                                    <div className="spinner"></div>
+                                    <span>{editandoProdId ? 'Guardando...' : 'Registrando...'}</span>
+                                  </>
+                                ) : (
+                                  <span>{editandoProdId ? 'Guardar Cambios' : 'Registrar Producto'}</span>
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  cancelarEdicionProd();
+                                  setCatProductView('list');
+                                }}
+                                className="btn-secondary"
+                                style={{ flex: 1 }}
+                                disabled={prodLoading}
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </form>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    /* Formulario de creación/edición de Categoría (Por defecto) */
+                    <div className="admin-section">
+                      <h3 className="section-title">🏷️ Registrar Categoría</h3>
+                      <p className="section-subtitle">Crea, edita o elimina las categorías del catálogo</p>
+                      
+                      {catError && (
+                        <div className="alert alert-error">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                          </svg>
+                          <span>{catError}</span>
+                        </div>
+                      )}
+                      {catSuccess && (
+                        <div className="alert alert-success">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                          </svg>
+                          <span>{catSuccess}</span>
+                        </div>
+                      )}
+
+                      <form onSubmit={(e) => e.preventDefault()} className="admin-form">
+                        <div className="form-group">
+                          <label className="form-label" htmlFor="nuevaCategoriaNombre">
+                            {editandoCatId ? '✏️ Editar Nombre de Categoría' : 'Nombre de la Categoría'}
+                          </label>
+                          <div className="input-wrapper">
+                            <input
+                              type="text"
+                              id="nuevaCategoriaNombre"
+                              className="form-input"
+                              style={{ paddingLeft: '2.5rem' }}
+                              placeholder="Ej. Postres"
+                              value={nuevaCategoriaNombre}
+                              onChange={(e) => setNuevaCategoriaNombre(e.target.value)}
+                            />
+                            <span className="input-icon">🏷️</span>
+                          </div>
+                        </div>
+
+                        <div className="form-group" style={{ marginTop: '1rem' }}>
+                          <label className="form-label" htmlFor="nuevaCategoriaEmoji">
+                            Emoji de la Categoría
+                          </label>
+                          <div className="input-wrapper">
+                            <select
+                              id="nuevaCategoriaEmoji"
+                              className="form-input form-select"
+                              value={nuevaCategoriaEmoji}
+                              onChange={(e) => setNuevaCategoriaEmoji(e.target.value)}
+                            >
+                              <option value="🏷️">🏷️ Categoría / Etiqueta</option>
+                              <option value="🍔">🍔 Hamburguesas</option>
+                              <option value="🌭">🌭 Completos / Hot Dogs</option>
+                              <option value="🍟">🍟 Acompañamientos / Papas</option>
+                              <option value="🥤">🥤 Bebidas / Bebestibles</option>
+                              <option value="🍕">🍕 Pizzas</option>
+                              <option value="🌮">🌮 Tacos</option>
+                              <option value="🍦">🍦 Postres / Helados</option>
+                              <option value="🍗">🍗 Pollos / Carnes</option>
+                              <option value="🧅">🧅 Ensaladas / Verduras</option>
+                              <option value="🧀">🧀 Quesos / Aderezos</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+                          {editandoCatId ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={handleUpdateCategory}
+                                className="btn-primary"
+                                style={{ flex: 1 }}
+                              >
+                                Guardar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelarEdicionCat}
+                                className="btn-secondary"
+                                style={{ flex: 1 }}
+                              >
+                                Cancelar
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleCreateCategory}
+                              className="btn-primary"
+                              style={{ width: '100%' }}
+                            >
+                              Crear Categoría
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    </div>
+                  )}
 
                   {/* Listado de categorías */}
                   <div className="admin-section users-list-section">
                     <h3 className="section-title">📋 Categorías Registradas</h3>
                     <p className="section-subtitle">Lista de categorías disponibles para clasificar productos</p>
+                    <p className="section-subtitle" style={{ fontStyle: 'italic', fontSize: '0.8rem', marginTop: '0.25rem', color: 'var(--text-muted)' }}>
+                      💡 Haz clic en una categoría para ver y gestionar sus productos.
+                    </p>
 
                     {listaCategorias.length === 0 ? (
                       <p className="empty-catalog" style={{ marginTop: '1rem' }}>No hay categorías registradas.</p>
                     ) : (
                       <div className="admin-categories-mini-list" style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         {listaCategorias.map((cat) => (
-                          <div key={cat.id} className="admin-category-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 'var(--radius-md)' }}>
+                          <div 
+                            key={cat.id} 
+                            className={`admin-category-item ${selectedCatForProducts?.id === cat.id ? 'active' : ''}`}
+                            onClick={() => {
+                              setSelectedCatForProducts(cat);
+                              setCatProductView('list');
+                              setProdSuccess('');
+                              setProdError('');
+                            }}
+                            style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center', 
+                              padding: '0.75rem 1rem', 
+                              background: selectedCatForProducts?.id === cat.id ? 'var(--item-bg-hover)' : 'rgba(255, 255, 255, 0.03)', 
+                              border: selectedCatForProducts?.id === cat.id ? '1px solid var(--accent-primary)' : '1px solid rgba(255, 255, 255, 0.05)', 
+                              borderRadius: 'var(--radius-md)',
+                              boxShadow: selectedCatForProducts?.id === cat.id ? '0 0 12px var(--accent-glow)' : 'none'
+                            }}
+                          >
                             <span className="admin-category-item-name" style={{ fontWeight: '500', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <span>{cat.emoji || '🏷️'}</span>
                               <span>{cat.nombre}</span>
@@ -1988,7 +2440,10 @@ function App() {
                             <div className="admin-category-item-actions" style={{ display: 'flex', gap: '0.5rem' }}>
                               <button
                                 type="button"
-                                onClick={() => iniciarEdicionCat(cat)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  iniciarEdicionCat(cat);
+                                }}
                                 className="btn-edit-cat-icon"
                                 style={{ background: 'rgba(255,255,255,0.05)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: 'var(--radius-sm)' }}
                                 title="Editar categoría"
@@ -1997,7 +2452,10 @@ function App() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleDeleteCategory(cat.id, cat.nombre)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteCategory(cat.id, cat.nombre);
+                                }}
                                 className="btn-delete-cat-icon"
                                 style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: 'var(--radius-sm)' }}
                                 title="Eliminar categoría"

@@ -1,6 +1,63 @@
-const pool = require('./db');
+const fs = require('fs');
+const path = require('path');
+const { Client } = require('pg');
+
+// 1. Asegurar la existencia del archivo .env a partir de .env.example
+const envPath = path.join(__dirname, '.env');
+const envExamplePath = path.join(__dirname, '.env.example');
+
+if (!fs.existsSync(envPath)) {
+  console.log('⚠️ El archivo .env no existe. Copiándolo a partir de .env.example...');
+  if (fs.existsSync(envExamplePath)) {
+    fs.copyFileSync(envExamplePath, envPath);
+    console.log('✅ Archivo .env creado automáticamente.');
+  } else {
+    console.error('❌ Error: No se encontró el archivo .env.example para copiar.');
+  }
+}
+
+// Cargar las variables de entorno
+require('dotenv').config({ path: envPath });
+
+const dbName = process.env.DB_DATABASE || 'calibre';
+
+const verificarCrearBaseDatos = async () => {
+  // Nos conectamos temporalmente a la base de datos por defecto 'postgres'
+  const client = new Client({
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT,
+    database: 'postgres',
+  });
+
+  try {
+    await client.connect();
+    // Verificar si la base de datos ya existe
+    const res = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
+    if (res.rowCount === 0) {
+      console.log(`La base de datos "${dbName}" no existe. Creándola...`);
+      // CREATE DATABASE no se puede parametrizar en PostgreSQL, por lo que interpolamos con seguridad
+      await client.query(`CREATE DATABASE "${dbName}"`);
+      console.log(`✅ Base de datos "${dbName}" creada con éxito.`);
+    } else {
+      console.log(`✅ La base de datos "${dbName}" ya existe.`);
+    }
+  } catch (err) {
+    console.error('⚠️ Error al verificar/crear la base de datos:', err.message);
+    console.log('Intentando continuar con la inicialización de tablas...');
+  } finally {
+    await client.end();
+  }
+};
 
 const setup = async () => {
+  // Aseguramos primero la base de datos
+  await verificarCrearBaseDatos();
+
+  // Importamos dinámicamente el pool de conexión una vez asegurada la base de datos y variables de entorno
+  const pool = require('./db');
+
   try {
     console.log('Creando tabla de usuarios si no existe...');
     await pool.query(`
@@ -37,11 +94,11 @@ const setup = async () => {
     if (parseInt(resCat.rows[0].count) === 0) {
       console.log('Insertando categorias de prueba...');
       await pool.query(`
-        INSERT INTO categorias (nombre) VALUES
-        ('General'),
-        ('Acompañamientos'),
-        ('Bebestibles'),
-        ('Otros')
+        INSERT INTO categorias (nombre, emoji) VALUES
+        ('General', '🍔'),
+        ('Acompañamientos', '🍟'),
+        ('Bebestibles', '🥤'),
+        ('Otros', '🏷️')
       `);
       console.log('✅ Categorías de prueba creadas.');
     } else {
@@ -197,6 +254,24 @@ const setup = async () => {
       );
     `);
     console.log('✅ Tablas de pedidos y pedido_productos creadas.');
+
+    console.log('Creando tabla de cierres_caja si no existe...');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS cierres_caja (
+        id SERIAL PRIMARY KEY,
+        fecha DATE UNIQUE NOT NULL,
+        cierre_fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        cargado_por VARCHAR(100) NOT NULL,
+        total_ventas DECIMAL(10, 2) NOT NULL,
+        total_efectivo DECIMAL(10, 2) NOT NULL,
+        total_tarjeta DECIMAL(10, 2) NOT NULL,
+        fondo_apertura DECIMAL(10, 2) NOT NULL,
+        efectivo_real DECIMAL(10, 2) NOT NULL,
+        diferencia DECIMAL(10, 2) NOT NULL,
+        observaciones TEXT
+      );
+    `);
+    console.log('✅ Tabla cierres_caja asegurada.');
   } catch (err) {
     console.error('❌ Error configurando la base de datos:', err);
   } finally {
