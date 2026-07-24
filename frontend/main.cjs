@@ -59,6 +59,9 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, 'dist/index.html'));
   }
 
+  // Maximizar la ventana principal al arrancar para usar toda la pantalla
+  mainWindow.maximize();
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -216,11 +219,12 @@ function printTicketPromise(ticket) {
               font-weight: bold !important;
             }
             body {
-              width: 52mm;
+              width: 68mm;
               margin: 0;
+              margin-left: 1.5mm;
               padding: 4mm 0mm 18mm 0mm; /* 18mm de margen abajo para que el papel avance antes de cortar y no corte el texto */
               font-family: 'Courier New', Courier, monospace;
-              font-size: 10.5px;
+              font-size: 13px;
               background-color: #ffffff !important;
               line-height: 1.3;
             }
@@ -236,7 +240,7 @@ function printTicketPromise(ticket) {
               margin-bottom: 3mm;
             }
             .comanda-client-name {
-              font-size: 18px;
+              font-size: 22px;
               font-weight: bold;
               margin: 0 0 1.5mm 0;
               text-transform: uppercase;
@@ -244,13 +248,13 @@ function printTicketPromise(ticket) {
               line-height: 1.1;
             }
             .comanda-local-name {
-              font-size: 12px;
+              font-size: 14px;
               font-weight: bold;
               margin-bottom: 1.5mm;
               text-transform: uppercase;
             }
             .comanda-ticket-number {
-              font-size: 13px;
+              font-size: 16px;
               font-weight: bold;
               display: inline-block;
               padding: 1mm 3mm;
@@ -258,7 +262,7 @@ function printTicketPromise(ticket) {
               margin: 1mm 0 2mm 0;
             }
             .delivery-type {
-              font-size: 12px;
+              font-size: 15px;
               font-weight: bold;
               margin: 1mm 0;
               text-transform: uppercase;
@@ -266,7 +270,7 @@ function printTicketPromise(ticket) {
             .comanda-date-time {
               display: flex;
               justify-content: space-between;
-              font-size: 9.5px;
+              font-size: 11px;
               margin-top: 2mm;
             }
             .comanda-body {
@@ -275,7 +279,7 @@ function printTicketPromise(ticket) {
             .comanda-table {
               width: 100%;
               border-collapse: collapse;
-              font-size: 10px;
+              font-size: 12px;
             }
             .comanda-table th {
               border-bottom: 1.5px solid #000000;
@@ -297,14 +301,14 @@ function printTicketPromise(ticket) {
             }
             .comanda-note {
               font-style: italic;
-              font-size: 10px;
+              font-size: 12px;
               padding: 2mm;
               border: 1px dashed #000000;
               text-align: left;
               margin-bottom: 2mm;
             }
             .comanda-attendant {
-              font-size: 9.5px;
+              font-size: 11px;
               font-style: italic;
               text-align: left;
             }
@@ -315,11 +319,11 @@ function printTicketPromise(ticket) {
               margin-top: 1mm;
             }
             .comanda-total-label {
-              font-size: 14px;
+              font-size: 17px;
               font-weight: bold;
             }
             .comanda-total-value {
-              font-size: 20px;
+              font-size: 25px;
               font-weight: 800;
             }
           </style>
@@ -366,7 +370,7 @@ function printTicketPromise(ticket) {
             </div>
           </div>
 
-          <div class="text-center" style="font-size: 9px; margin-top: 4mm; border-top: 1px dashed #000000; padding-top: 2mm;">
+          <div class="text-center" style="font-size: 11px; margin-top: 4mm; border-top: 1px dashed #000000; padding-top: 2mm;">
             <p>Gracias por su preferencia</p>
             <p>Calibre 25</p>
           </div>
@@ -499,11 +503,12 @@ function printReportPromise(report) {
               font-weight: bold !important;
             }
             body {
-              width: 52mm;
+              width: 68mm;
               margin: 0;
+              margin-left: 1.5mm;
               padding: 4mm 0mm 18mm 0mm; /* 18mm de margen abajo para avance de papel */
               font-family: 'Courier New', Courier, monospace;
-              font-size: 10px;
+              font-size: 12.5px;
               background-color: #ffffff !important;
               line-height: 1.3;
             }
@@ -518,18 +523,18 @@ function printReportPromise(report) {
               margin-bottom: 3mm;
             }
             .report-title {
-              font-size: 15px;
+              font-size: 18px;
               font-weight: bold;
               margin: 0 0 1mm 0;
               text-transform: uppercase;
               letter-spacing: 0.5px;
             }
             .report-date-time {
-              font-size: 9px;
+              font-size: 11px;
               margin-top: 1mm;
             }
             .report-section-title {
-              font-size: 11px;
+              font-size: 13.5px;
               font-weight: bold;
               border-bottom: 1.5px solid #000000;
               padding: 1mm 0;
@@ -540,7 +545,7 @@ function printReportPromise(report) {
             .report-table {
               width: 100%;
               border-collapse: collapse;
-              font-size: 9.5px;
+              font-size: 11.5px;
             }
             .report-table td {
               padding: 1.5mm 0;
@@ -550,7 +555,7 @@ function printReportPromise(report) {
               border-bottom: 1.5px solid #000000;
               padding: 1mm 0;
               text-align: left;
-              font-size: 9.5px;
+              font-size: 11.5px;
               font-weight: bold;
             }
             .report-summary-row {
@@ -563,7 +568,7 @@ function printReportPromise(report) {
               border-top: 1.5px solid #000000;
               border-bottom: 1.5px solid #000000;
               padding: 2mm 0;
-              font-size: 12px;
+              font-size: 14.5px;
               margin-top: 1mm;
               font-weight: bold;
             }
@@ -572,7 +577,7 @@ function printReportPromise(report) {
               border: 1px dashed #000000;
               margin-top: 2mm;
               text-align: center;
-              font-size: 10.5px;
+              font-size: 13px;
               font-weight: bold;
             }
           </style>
@@ -580,7 +585,7 @@ function printReportPromise(report) {
         <body>
           <div class="report-header">
             <h2 class="report-title">REPORTE DE CIERRE</h2>
-            <div style="font-size: 11px;">Calibre 25</div>
+            <div style="font-size: 13px;">Calibre 25</div>
             <div class="report-date-time">
               Fecha Cierre: ${fechaStr}<br/>
               Impreso el: ${impresoFecha} ${impresoHora}
@@ -628,7 +633,7 @@ function printReportPromise(report) {
               (${report.diferencia === 0 ? 'CAJA CUADRADA' : report.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE'})
             </div>
             ${report.observaciones ? `
-              <div style="margin-top: 2mm; font-size: 9px; font-style: italic; border: 1px dashed #cccccc; padding: 1.5mm;">
+              <div style="margin-top: 2mm; font-size: 11px; font-style: italic; border: 1px dashed #cccccc; padding: 1.5mm;">
                 Obs: "${report.observaciones}"
               </div>
             ` : ''}
@@ -684,7 +689,7 @@ function printReportPromise(report) {
             </table>
           ` : ''}
 
-          <div class="text-center" style="font-size: 9px; margin-top: 6mm; border-top: 1px dashed #000000; padding-top: 2mm;">
+          <div class="text-center" style="font-size: 11px; margin-top: 6mm; border-top: 1px dashed #000000; padding-top: 2mm;">
             <p>Calibre 25 - Gestión de Caja</p>
           </div>
         </body>
@@ -749,6 +754,31 @@ function printReportPromise(report) {
   });
 }
 
+function sendInventoryEmail() {
+  try {
+    const { net } = require('electron');
+    const request = net.request({
+      method: 'POST',
+      protocol: 'http:',
+      hostname: '127.0.0.1',
+      port: 5000,
+      path: '/api/reportes/enviar'
+    });
+    
+    request.on('response', (response) => {
+      console.log(`[Electron] Reporte de inventario enviado al backend. Status: ${response.statusCode}`);
+    });
+    
+    request.on('error', (err) => {
+      console.error('[Electron] Error de red al solicitar envío de reporte al backend:', err);
+    });
+    
+    request.end();
+  } catch (err) {
+    console.error('[Electron] Error general al solicitar envío de reporte de inventario:', err);
+  }
+}
+
 // Handlers para las peticiones IPC de impresión
 ipcMain.on('print-ticket', (event, ticket) => {
   console.log(`[Electron Print] Recibido ticket N° ${ticket.ticket} para encolar.`);
@@ -762,6 +792,9 @@ ipcMain.on('print-report', (event, report) => {
   report.type = 'report';
   printQueue.push(report);
   processPrintQueue();
+  
+  // Enviar el inventario por correo de forma asíncrona
+  sendInventoryEmail();
 });
 
 ipcMain.handle('get-printers', async () => {

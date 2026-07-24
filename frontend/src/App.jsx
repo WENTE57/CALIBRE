@@ -170,6 +170,7 @@ function App() {
 
   // Estados para creación dinámica de categorías
   const [listaCategorias, setListaCategorias] = useState([]);
+  const [draggedCatIndex, setDraggedCatIndex] = useState(null);
   const [nuevaCategoriaNombre, setNuevaCategoriaNombre] = useState('');
   const [nuevaCategoriaEmoji, setNuevaCategoriaEmoji] = useState('🏷️');
   const [catSuccess, setCatSuccess] = useState('');
@@ -178,11 +179,46 @@ function App() {
   const [selectedCatForProducts, setSelectedCatForProducts] = useState(null);
   const [catProductView, setCatProductView] = useState('list'); // 'list', 'create', 'edit'
 
+  // Estados para configuración de correo
+  const [configEmailTo, setConfigEmailTo] = useState('');
+  const [configEmailFrom, setConfigEmailFrom] = useState('');
+  const [configSmtpHost, setConfigSmtpHost] = useState('');
+  const [configSmtpPort, setConfigSmtpPort] = useState('1025');
+  const [configSmtpSecure, setConfigSmtpSecure] = useState(false);
+  const [configSmtpUser, setConfigSmtpUser] = useState('');
+  const [configSmtpPass, setConfigSmtpPass] = useState('');
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSuccess, setConfigSuccess] = useState('');
+  const [configError, setConfigError] = useState('');
+
   // Estados para búsqueda en historial
   const [filtroTicketId, setFiltroTicketId] = useState('');
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroFechaInicio, setFiltroFechaInicio] = useState('');
   const [filtroFechaFin, setFiltroFechaFin] = useState('');
+  const [filtroProductoAdmin, setFiltroProductoAdmin] = useState('');
+
+  // Estados para administración de Promociones
+  const [promociones, setPromociones] = useState([]);
+  const [promocionesLoading, setPromocionesLoading] = useState(false);
+  const [promocionesError, setPromocionesError] = useState('');
+  const [promoNombre, setPromoNombre] = useState('');
+  const [promoEmoji, setPromoEmoji] = useState('🎁');
+  const [promoPrecio, setPromoPrecio] = useState('');
+  const [promoActivo, setPromoActivo] = useState(true);
+  const [promoProductosFijos, setPromoProductosFijos] = useState([]);
+  const [promoPasos, setPromoPasos] = useState([]);
+  const [editandoPromoId, setEditandoPromoId] = useState(null);
+  const [promoError, setPromoError] = useState('');
+  const [promoSuccess, setPromoSuccess] = useState('');
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promocionesView, setPromocionesView] = useState('list'); // 'list', 'create', 'edit'
+
+  // Selección de promociones en el POS
+  const [showPromoSelectorModal, setShowPromoSelectorModal] = useState(false);
+  const [selectedPromo, setSelectedPromo] = useState(null);
+  const [currentPromoStepIndex, setCurrentPromoStepIndex] = useState(0);
+  const [chosenPromoOpciones, setChosenPromoOpciones] = useState([]);
 
   // Estados para Cierre de Caja
   const [fechaCierre, setFechaCierre] = useState(() => {
@@ -285,6 +321,361 @@ function App() {
       setProductosError('No se pudo conectar al servidor para obtener los productos.');
     } finally {
       setProductosLoading(false);
+    }
+  };
+
+  const cargarPromociones = async () => {
+    setPromocionesLoading(true);
+    setPromocionesError('');
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/promociones');
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setPromociones(data.promociones);
+      } else {
+        setPromocionesError(data.message || 'Error al obtener las promociones.');
+      }
+    } catch (err) {
+      console.error(err);
+      setPromocionesError('No se pudo conectar al servidor para obtener las promociones.');
+    } finally {
+      setPromocionesLoading(false);
+    }
+  };
+
+  const seleccionarPromocion = (promo) => {
+    if (!promo.pasos || promo.pasos.length === 0) {
+      const fijosStr = promo.productos_fijos && promo.productos_fijos.length > 0
+        ? ` (${promo.productos_fijos.map(pf => `${pf.cantidad}x ${pf.nombre_producto}`).join(', ')})`
+        : '';
+      const itemPromo = {
+        id: `promo-${promo.id}-${Date.now()}`,
+        promocion_id: promo.id,
+        nombre: `${promo.nombre}${fijosStr}`,
+        precio: parseFloat(promo.precio),
+        cantidad: 1,
+        imagen: promo.emoji || '🎁',
+        productos_fijos: promo.productos_fijos || [],
+        opciones_elegidas: []
+      };
+      setPedido((prev) => [...prev, itemPromo]);
+      return;
+    }
+
+    setSelectedPromo(promo);
+    setCurrentPromoStepIndex(0);
+    setChosenPromoOpciones([]);
+    setShowPromoSelectorModal(true);
+  };
+
+  const seleccionarOpcionPaso = (opcion) => {
+    const paso = selectedPromo.pasos[currentPromoStepIndex];
+    const choice = {
+      paso_id: paso.id,
+      producto_id: opcion.producto_id,
+      nombre_producto: opcion.nombre_producto,
+      precio_adicional: parseFloat(opcion.precio_adicional) || 0.00
+    };
+
+    const nuevasOpciones = [...chosenPromoOpciones, choice];
+    setChosenPromoOpciones(nuevasOpciones);
+
+    if (currentPromoStepIndex < selectedPromo.pasos.length - 1) {
+      setCurrentPromoStepIndex(currentPromoStepIndex + 1);
+    } else {
+      const totalExtra = nuevasOpciones.reduce((sum, opt) => sum + opt.precio_adicional, 0);
+      const finalPrice = parseFloat(selectedPromo.precio) + totalExtra;
+      
+      const opcionesStr = nuevasOpciones.map(opt => opt.nombre_producto).join(', ');
+      const finalName = `${selectedPromo.nombre} (${opcionesStr})`;
+      
+      const itemPromo = {
+        id: `promo-${selectedPromo.id}-${Date.now()}`,
+        promocion_id: selectedPromo.id,
+        nombre: finalName,
+        precio: finalPrice,
+        cantidad: 1,
+        imagen: selectedPromo.emoji || '🎁',
+        productos_fijos: selectedPromo.productos_fijos || [],
+        opciones_elegidas: nuevasOpciones.map(opt => ({
+          producto_id: opt.producto_id,
+          nombre_producto: opt.nombre_producto
+        }))
+      };
+
+      setPedido((prev) => [...prev, itemPromo]);
+      setShowPromoSelectorModal(false);
+      setSelectedPromo(null);
+    }
+  };
+
+  const agregarPasoPromoForm = () => {
+    setPromoPasos([
+      ...promoPasos,
+      {
+        temp_id: Date.now() + Math.random(),
+        nombre_paso: '',
+        obligatorio: true,
+        opciones: []
+      }
+    ]);
+  };
+
+  const eliminarPasoPromoForm = (tempIdOrRealId, isRealId) => {
+    setPromoPasos(promoPasos.filter(p => isRealId ? p.id !== tempIdOrRealId : p.temp_id !== tempIdOrRealId));
+  };
+
+  const actualizarNombrePasoForm = (tempIdOrRealId, isRealId, val) => {
+    setPromoPasos(promoPasos.map(p => {
+      const match = isRealId ? p.id === tempIdOrRealId : p.temp_id === tempIdOrRealId;
+      return match ? { ...p, nombre_paso: val } : p;
+    }));
+  };
+
+  const actualizarObligatorioPasoForm = (tempIdOrRealId, isRealId, val) => {
+    setPromoPasos(promoPasos.map(p => {
+      const match = isRealId ? p.id === tempIdOrRealId : p.temp_id === tempIdOrRealId;
+      return match ? { ...p, obligatorio: val } : p;
+    }));
+  };
+
+  const agregarOpcionAlPasoForm = (pasoTempIdOrRealId, isRealId, productoId, precioAdicional) => {
+    const prod = productos.find(p => p.id === parseInt(productoId));
+    if (!prod) return;
+
+    setPromoPasos(promoPasos.map(p => {
+      const match = isRealId ? p.id === pasoTempIdOrRealId : p.temp_id === pasoTempIdOrRealId;
+      if (!match) return p;
+
+      if (p.opciones.some(o => o.producto_id === prod.id)) {
+        abrirAlerta('Este producto ya está agregado en este paso.', 'Opción Duplicada');
+        return p;
+      }
+
+      return {
+        ...p,
+        opciones: [
+          ...p.opciones,
+          {
+            producto_id: prod.id,
+            nombre_producto: prod.nombre,
+            precio_producto: prod.precio,
+            precio_adicional: parseFloat(precioAdicional) || 0.00
+          }
+        ]
+      };
+    }));
+  };
+
+  const eliminarOpcionDelPasoForm = (pasoTempIdOrRealId, isRealId, productoId) => {
+    setPromoPasos(promoPasos.map(p => {
+      const match = isRealId ? p.id === pasoTempIdOrRealId : p.temp_id === pasoTempIdOrRealId;
+      if (!match) return p;
+
+      return {
+        ...p,
+        opciones: p.opciones.filter(o => o.producto_id !== productoId)
+      };
+    }));
+  };
+
+  const agregarProductoFijoPromoForm = (productoId, cantidad) => {
+    const prod = productos.find(p => p.id === parseInt(productoId));
+    if (!prod) return;
+    const cant = parseInt(cantidad) || 1;
+
+    const existe = promoProductosFijos.find(pf => pf.producto_id === prod.id);
+    if (existe) {
+      setPromoProductosFijos(promoProductosFijos.map(pf =>
+        pf.producto_id === prod.id ? { ...pf, cantidad: pf.cantidad + cant } : pf
+      ));
+    } else {
+      setPromoProductosFijos([
+        ...promoProductosFijos,
+        {
+          producto_id: prod.id,
+          nombre_producto: prod.nombre,
+          precio_producto: prod.precio,
+          cantidad: cant
+        }
+      ]);
+    }
+  };
+
+  const eliminarProductoFijoPromoForm = (productoId) => {
+    setPromoProductosFijos(promoProductosFijos.filter(pf => pf.producto_id !== productoId));
+  };
+
+  const handleSavePromo = async (e) => {
+    e.preventDefault();
+    if (!promoNombre.trim() || !promoPrecio.toString().trim()) {
+      setPromoError('Completa todos los campos obligatorios (nombre y precio).');
+      setPromoSuccess('');
+      return;
+    }
+
+    if (promoPasos.length === 0 && promoProductosFijos.length === 0) {
+      setPromoError('Una promoción debe incluir al menos un producto fijo o un paso de selección.');
+      setPromoSuccess('');
+      return;
+    }
+
+    for (const paso of promoPasos) {
+      if (!paso.nombre_paso.trim()) {
+        setPromoError('Todos los pasos deben tener un nombre.');
+        setPromoSuccess('');
+        return;
+      }
+      if (paso.opciones.length === 0) {
+        setPromoError(`El paso "${paso.nombre_paso}" debe tener al menos una opción.`);
+        setPromoSuccess('');
+        return;
+      }
+    }
+
+    setPromoLoading(true);
+    setPromoError('');
+    setPromoSuccess('');
+
+    try {
+      const url = editandoPromoId
+        ? `http://127.0.0.1:5000/api/promociones/${editandoPromoId}`
+        : 'http://127.0.0.1:5000/api/promociones';
+      const method = editandoPromoId ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          nombre: promoNombre.trim(),
+          precio: parseFloat(promoPrecio),
+          activo: promoActivo,
+          productos_fijos: promoProductosFijos,
+          pasos: promoPasos,
+          emoji: promoEmoji
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setPromoSuccess(data.message);
+        setPromoNombre('');
+        setPromoPrecio('');
+        setPromoEmoji('🎁');
+        setPromoActivo(true);
+        setPromoProductosFijos([]);
+        setPromoPasos([]);
+        setEditandoPromoId(null);
+        setPromocionesView('list');
+        cargarPromociones();
+      } else {
+        setPromoError(data.message || 'Error al guardar la promoción.');
+      }
+    } catch (err) {
+      console.error(err);
+      setPromoError('Error de conexión con el servidor.');
+    } finally {
+      setPromoLoading(false);
+    }
+  };
+
+  const iniciarEdicionPromo = (promo) => {
+    setEditandoPromoId(promo.id);
+    setPromoNombre(promo.nombre);
+    setPromoPrecio(promo.precio);
+    setPromoEmoji(promo.emoji || '🎁');
+    setPromoActivo(promo.activo !== false);
+    setPromoProductosFijos(promo.productos_fijos || []);
+    setPromoPasos((promo.pasos || []).map(paso => ({
+      ...paso,
+      temp_id: paso.id || (Date.now() + Math.random())
+    })));
+    setPromoError('');
+    setPromoSuccess('');
+    setPromocionesView('edit');
+  };
+
+  const handleDeletePromo = (promoId, promoNombre) => {
+    abrirConfirmacion(
+      `¿Estás seguro de que deseas eliminar la promoción "${promoNombre}"?`,
+      'Confirmar Eliminación',
+      async () => {
+        try {
+          const response = await fetch(`http://127.0.0.1:5000/api/promociones/${promoId}`, {
+            method: 'DELETE'
+          });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            cargarPromociones();
+            abrirAlerta(`Promoción "${promoNombre}" eliminada correctamente.`, 'Éxito');
+          } else {
+            abrirAlerta(data.message || 'Error al eliminar la promoción.', 'Error');
+          }
+        } catch (err) {
+          console.error(err);
+          abrirAlerta('Error de red al conectar con el servidor.', 'Error de Conexión');
+        }
+      }
+    );
+  };
+
+  const cargarConfiguracion = async () => {
+    try {
+      setConfigLoading(true);
+      setConfigError('');
+      setConfigSuccess('');
+      const response = await fetch('http://127.0.0.1:5000/api/configuracion');
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const config = data.config || {};
+        setConfigEmailTo(config.REPORT_EMAIL_TO || '');
+        setConfigEmailFrom(config.REPORT_EMAIL_FROM || 'inglesnaipe61@gmail.com');
+        setConfigSmtpHost(config.SMTP_HOST || 'smtp.gmail.com');
+        setConfigSmtpPort(config.SMTP_PORT || '587');
+        setConfigSmtpSecure(config.SMTP_SECURE === 'true' || config.SMTP_SECURE === '1');
+        setConfigSmtpUser(config.SMTP_USER || 'inglesnaipe61@gmail.com');
+        setConfigSmtpPass(config.SMTP_PASS || '');
+      } else {
+        setConfigError(data.message || 'Error al cargar la configuración.');
+      }
+    } catch (err) {
+      console.error('Error al cargar configuración:', err);
+      setConfigError('Error de red al cargar la configuración.');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const guardarConfiguracion = async (e) => {
+    if (e) e.preventDefault();
+    try {
+      setConfigLoading(true);
+      setConfigSuccess('');
+      setConfigError('');
+      
+      const config = {
+        REPORT_EMAIL_TO: configEmailTo
+      };
+
+      const response = await fetch('http://127.0.0.1:5000/api/configuracion', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ config })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setConfigSuccess('Configuración guardada correctamente.');
+      } else {
+        setConfigError(data.message || 'Error al guardar la configuración.');
+      }
+    } catch (err) {
+      console.error('Error al guardar configuración:', err);
+      setConfigError('Error de red al guardar la configuración.');
+    } finally {
+      setConfigLoading(false);
     }
   };
 
@@ -397,6 +788,61 @@ function App() {
       }
     } catch (err) {
       console.error('Error al cargar categorías:', err);
+    }
+  };
+
+  const handleCatDragStart = (e, index) => {
+    setDraggedCatIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index);
+  };
+
+  const handleCatDragOver = (e, index) => {
+    e.preventDefault();
+    if (draggedCatIndex === null || draggedCatIndex === index) return;
+
+    // Obtener las coordenadas del elemento objetivo para evitar el parpadeo en cuadrícula 2D
+    const rect = e.currentTarget.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const isForward = draggedCatIndex < index;
+
+    if (isForward) {
+      // Si va hacia adelante (derecha o abajo), debe haber cruzado el centro en X o en Y
+      if (e.clientX < centerX && e.clientY < centerY) return;
+    } else {
+      // Si va hacia atrás (izquierda o arriba), debe haber cruzado el centro en X o en Y
+      if (e.clientX > centerX && e.clientY > centerY) return;
+    }
+
+    const newLista = [...listaCategorias];
+    const draggedItem = newLista[draggedCatIndex];
+    newLista.splice(draggedCatIndex, 1);
+    newLista.splice(index, 0, draggedItem);
+
+    setDraggedCatIndex(index);
+    setListaCategorias(newLista);
+  };
+
+  const handleCatDragEnd = async () => {
+    setDraggedCatIndex(null);
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/categorias/reordenar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ordenamiento: listaCategorias.map((c) => c.id),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        console.error('Error al guardar el orden:', data.message);
+      }
+    } catch (err) {
+      console.error('Error de red al guardar el orden de categorías:', err);
     }
   };
 
@@ -666,6 +1112,47 @@ function App() {
     setProdSuccess('');
   };
 
+  const getProductIndexInfo = () => {
+    const categoriaActiva = selectedCatForProducts ? selectedCatForProducts.nombre : prodCategoria;
+    if (!categoriaActiva || !editandoProdId) return { isFirst: true, isLast: true };
+
+    const list = productos.filter(p => p.categoria === categoriaActiva);
+    if (list.length <= 1) return { isFirst: true, isLast: true };
+
+    const currentIndex = list.findIndex(p => p.id === editandoProdId);
+    if (currentIndex === -1) return { isFirst: true, isLast: true };
+
+    return {
+      isFirst: currentIndex === 0,
+      isLast: currentIndex === list.length - 1
+    };
+  };
+
+  const navegarEdicionProd = (direccion) => {
+    const categoriaActiva = selectedCatForProducts ? selectedCatForProducts.nombre : prodCategoria;
+    if (!categoriaActiva || !editandoProdId) return;
+
+    const list = productos.filter(p => p.categoria === categoriaActiva);
+    if (list.length <= 1) return;
+
+    const currentIndex = list.findIndex(p => p.id === editandoProdId);
+    if (currentIndex === -1) return;
+
+    let targetIndex;
+    if (direccion === 'siguiente') {
+      if (currentIndex === list.length - 1) return;
+      targetIndex = currentIndex + 1;
+    } else {
+      if (currentIndex === 0) return;
+      targetIndex = currentIndex - 1;
+    }
+
+    const targetProduct = list[targetIndex];
+    iniciarEdicionProd(targetProduct);
+    setProdError('');
+    setProdSuccess('');
+  };
+
   const handleDeleteProduct = (productId, productName) => {
     abrirConfirmacion(
       `¿Estás seguro de que deseas eliminar el producto "${productName}"?`,
@@ -876,6 +1363,7 @@ function App() {
     if (user) {
       cargarProductos();
       cargarCategorias();
+      cargarPromociones();
     }
   }, [user]);
 
@@ -885,11 +1373,17 @@ function App() {
     }
   }, [user, activeTab]);
 
+
+
   useEffect(() => {
-    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre')) {
+    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre' || activeTab === 'promociones')) {
       cargarIngredientes();
       cargarCategorias();
       cargarProductos();
+      cargarPromociones();
+      if (activeTab === 'cierre') {
+        cargarConfiguracion();
+      }
     }
   }, [user, activeTab]);
 
@@ -1087,7 +1581,9 @@ function App() {
         id: item.id,
         nombre: item.nombre,
         cantidad: item.cantidad,
-        precio: parseFloat(item.precio)
+        precio: parseFloat(item.precio),
+        promocion_id: item.promocion_id || null,
+        opciones_elegidas: item.opciones_elegidas || []
       })),
       nota: pedidoNota.trim() || null,
       tipo_entrega: tipoEntrega,
@@ -1387,11 +1883,18 @@ function App() {
                       🏷️ Categorías
                     </button>
                     <button 
+                      onClick={() => setActiveTab('promociones')} 
+                      className={`nav-tab ${activeTab === 'promociones' ? 'active' : ''}`}
+                    >
+                      🎁 Promociones
+                    </button>
+                    <button 
                       onClick={() => setActiveTab('inventario')} 
                       className={`nav-tab ${activeTab === 'inventario' ? 'active' : ''}`}
                     >
                       🥑 Inventario
                     </button>
+
                   </>
                 )}
                 <button 
@@ -1408,9 +1911,20 @@ function App() {
                 </button>
               </div>
 
-              <button onClick={handleLogout} className="btn-secondary">
-                Cerrar Sesión
-              </button>
+              <div className="header-actions" style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                <button onClick={handleLogout} className="btn-secondary">
+                  Cerrar Sesión
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setIsDark(!isDark)} 
+                  className="theme-toggle-header"
+                  title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+                  style={{ position: 'absolute', top: '100%', marginTop: '0.4rem', right: 0 }}
+                >
+                  {isDark ? '☀️ Claro' : '🌙 Oscuro'}
+                </button>
+              </div>
             </div>
 
             {/* PESTAÑA DE PEDIDOS (Visible para todos) */}
@@ -1443,16 +1957,44 @@ function App() {
                   <div className="pos-catalog-layout">
                     {/* Filtro de Categorías (Sidebar Izquierdo) */}
                     <div className="category-sidebar">
-                      {['Todos', ...listaCategorias].map((cat) => {
-                        const isTodos = typeof cat === 'string';
-                        const nombre = isTodos ? 'Todos' : cat.nombre;
-                        const emoji = isTodos ? '🍽️' : (cat.emoji || '📁');
-                        
+                      {/* Categorías Estáticas (No arrastrables) */}
+                      <button
+                        onClick={() => setCategoriaSeleccionada('Todos')}
+                        className={`category-sidebar-btn ${categoriaSeleccionada === 'Todos' ? 'active' : ''}`}
+                      >
+                        <span className="category-btn-icon">🍽️</span>
+                        <span className="category-btn-text" title="Todos">Todos</span>
+                      </button>
+                      <button
+                        onClick={() => setCategoriaSeleccionada('Promociones')}
+                        className={`category-sidebar-btn ${categoriaSeleccionada === 'Promociones' ? 'active' : ''}`}
+                      >
+                        <span className="category-btn-icon">🎁</span>
+                        <span className="category-btn-text" title="Promociones">Promociones</span>
+                      </button>
+
+                      {/* Categorías Dinámicas (Arrastrables) */}
+                      {listaCategorias.map((cat, idx) => {
+                        const nombre = cat.nombre;
+                        const emoji = cat.emoji || '📁';
+                        const isDragging = draggedCatIndex === idx;
+
                         return (
-                          <button
-                            key={nombre}
+                          <div
+                            key={cat.id}
+                            draggable="true"
+                            onDragStart={(e) => handleCatDragStart(e, idx)}
+                            onDragOver={(e) => handleCatDragOver(e, idx)}
+                            onDragEnd={handleCatDragEnd}
                             onClick={() => setCategoriaSeleccionada(nombre)}
-                            className={`category-sidebar-btn ${categoriaSeleccionada === nombre ? 'active' : ''}`}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                setCategoriaSeleccionada(nombre);
+                              }
+                            }}
+                            role="button"
+                            tabIndex={0}
+                            className={`category-sidebar-btn draggable ${categoriaSeleccionada === nombre ? 'active' : ''} ${isDragging ? 'dragging' : ''}`}
                           >
                             <span className="category-btn-icon">
                               {emoji}
@@ -1460,7 +2002,7 @@ function App() {
                             <span className="category-btn-text" title={nombre}>
                               {nombre}
                             </span>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -1468,22 +2010,41 @@ function App() {
                     {/* Contenedor de Productos (Derecha) */}
                     <div className="products-container">
                       <div className="products-grid">
-                        {productos
-                          .filter((prod) => categoriaSeleccionada === 'Todos' || prod.categoria === categoriaSeleccionada)
-                          .map((prod) => (
-                            <div key={prod.id} className="product-card" onClick={() => agregarAlPedido(prod)}>
-                              <div className="product-emoji">{prod.imagen || '🍔'}</div>
-                              <div className="product-info">
-                                <h4 className="product-name">{prod.nombre}</h4>
-                                <span className="product-price">
-                                   ${parseFloat(prod.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                                </span>
+                        {categoriaSeleccionada === 'Promociones' ? (
+                          promociones
+                            .filter(promo => promo.activo !== false)
+                            .map((promo) => (
+                              <div key={`promo-${promo.id}`} className="product-card promotion-card" onClick={() => seleccionarPromocion(promo)} style={{ border: '1px dashed var(--accent-primary)', position: 'relative' }}>
+                                <div className="product-emoji" style={{ color: 'var(--accent-primary)' }}>{promo.emoji || '🎁'}</div>
+                                <div className="product-info">
+                                  <h4 className="product-name" style={{ color: 'var(--accent-primary)', fontWeight: 'bold' }}>{promo.nombre}</h4>
+                                  <span className="product-price">
+                                     ${parseFloat(promo.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                  </span>
+                                </div>
+                                <button className="btn-add" style={{ background: 'var(--accent-primary)' }}>
+                                  <span>+</span>
+                                </button>
                               </div>
-                              <button className="btn-add">
-                                <span>+</span>
-                              </button>
-                            </div>
-                          ))}
+                            ))
+                        ) : (
+                          productos
+                            .filter((prod) => (categoriaSeleccionada === 'Todos' && prod.categoria !== 'Promociones') || prod.categoria === categoriaSeleccionada)
+                            .map((prod) => (
+                              <div key={prod.id} className="product-card" onClick={() => agregarAlPedido(prod)}>
+                                <div className="product-emoji">{prod.imagen || '🍔'}</div>
+                                <div className="product-info">
+                                  <h4 className="product-name">{prod.nombre}</h4>
+                                  <span className="product-price">
+                                     ${parseFloat(prod.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                  </span>
+                                </div>
+                                <button className="btn-add">
+                                  <span>+</span>
+                                </button>
+                              </div>
+                            ))
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1793,6 +2354,8 @@ function App() {
                             <option value="🌭">🌭 Hot Dog / Completo</option>
                             <option value="🍦">🍦 Helado</option>
                             <option value="🍗">🍗 Pollo Frito</option>
+                            <option value="☕">☕ Café</option>
+                            <option value="🍵">🍵 Té</option>
                           </select>
                         </div>
                       </div>
@@ -1902,6 +2465,28 @@ function App() {
                           </button>
                         )}
                       </div>
+                      {editandoProdId && (
+                        <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => navegarEdicionProd('anterior')}
+                            className="btn-secondary"
+                            style={{ flex: 1, display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                            disabled={prodLoading || getProductIndexInfo().isFirst}
+                          >
+                            ◀️ Anterior
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navegarEdicionProd('siguiente')}
+                            className="btn-secondary"
+                            style={{ flex: 1, display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                            disabled={prodLoading || getProductIndexInfo().isLast}
+                          >
+                            Siguiente ▶️
+                          </button>
+                        </div>
+                      )}
                     </form>
                   </div>
 
@@ -1909,6 +2494,17 @@ function App() {
                   <div className="admin-section users-list-section">
                     <h3 className="section-title">📋 Catálogo de Productos</h3>
                     <p className="section-subtitle font-sm">Lista de productos disponibles para pedidos</p>
+
+                    <div style={{ margin: '1rem 0' }}>
+                      <input
+                        type="text"
+                        placeholder="🔍 Buscar producto por nombre o categoría..."
+                        className="form-input"
+                        style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                        value={filtroProductoAdmin}
+                        onChange={(e) => setFiltroProductoAdmin(e.target.value)}
+                      />
+                    </div>
 
                     {productosLoading && (
                       <div className="loading-container">
@@ -1925,8 +2521,17 @@ function App() {
 
                     {!productosLoading && !productosError && (
                       <div className="users-list-container">
-                        {productos.map((p) => (
-                          <div key={p.id} className="user-list-item">
+                        {productos
+                          .filter((p) => {
+                            const term = filtroProductoAdmin.trim().toLowerCase();
+                            if (!term) return true;
+                            return (
+                              p.nombre.toLowerCase().includes(term) ||
+                              (p.categoria && p.categoria.toLowerCase().includes(term))
+                            );
+                          })
+                          .map((p) => (
+                            <div key={p.id} className="user-list-item">
                             <div className="user-list-info" style={{ flexGrow: 1 }}>
                               <span className="user-list-name">
                                 {p.imagen || '🍔'} {p.nombre}
@@ -2198,6 +2803,8 @@ function App() {
                                   <option value="🌭">🌭 Hot Dog / Completo</option>
                                   <option value="🍦">🍦 Helado</option>
                                   <option value="🍗">🍗 Pollo Frito</option>
+                                  <option value="☕">☕ Café</option>
+                                  <option value="🍵">🍵 Té</option>
                                 </select>
                               </div>
                             </div>
@@ -2290,6 +2897,28 @@ function App() {
                                 Cancelar
                               </button>
                             </div>
+                            {editandoProdId && (
+                              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => navegarEdicionProd('anterior')}
+                                  className="btn-secondary"
+                                  style={{ flex: 1, display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                                  disabled={prodLoading || getProductIndexInfo().isFirst}
+                                >
+                                  ◀️ Anterior
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => navegarEdicionProd('siguiente')}
+                                  className="btn-secondary"
+                                  style={{ flex: 1, display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
+                                  disabled={prodLoading || getProductIndexInfo().isLast}
+                                >
+                                  Siguiente ▶️
+                                </button>
+                              </div>
+                            )}
                           </form>
                         </>
                       )}
@@ -2361,6 +2990,8 @@ function App() {
                               <option value="🍗">🍗 Pollos / Carnes</option>
                               <option value="🧅">🧅 Ensaladas / Verduras</option>
                               <option value="🧀">🧀 Quesos / Aderezos</option>
+                              <option value="☕">☕ Café</option>
+                              <option value="🍵">🍵 Té</option>
                             </select>
                           </div>
                         </div>
@@ -2468,6 +3099,537 @@ function App() {
                       </div>
                     )}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'promociones' && (
+              <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '2rem', overflow: 'hidden' }}>
+                {/* Formulario / Configuración de la Promoción (Izquierda) */}
+                <div className="admin-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  {promocionesView === 'list' ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                      <span style={{ fontSize: '3rem' }}>🎁</span>
+                      <h4 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>Módulo de Promociones</h4>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', textAlign: 'center', maxWidth: '300px' }}>
+                        Crea promociones avanzadas y combos que descuenten ingredientes de forma precisa.
+                      </p>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => {
+                          setPromoNombre('');
+                          setPromoPrecio('');
+                          setPromoEmoji('🎁');
+                          setPromoActivo(true);
+                          setPromoPasos([]);
+                          setEditandoPromoId(null);
+                          setPromoError('');
+                          setPromoSuccess('');
+                          setPromocionesView('create');
+                        }}
+                        style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+                      >
+                        ➕ Crear Nueva Promoción
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="admin-section-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h3 className="section-title">
+                          {promocionesView === 'create' ? '➕ Nueva Promoción' : '✏️ Editar Promoción'}
+                        </h3>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => {
+                            setPromoNombre('');
+                            setPromoPrecio('');
+                            setPromoEmoji('🎁');
+                            setPromoPasos([]);
+                            setEditandoPromoId(null);
+                            setPromoError('');
+                            setPromoSuccess('');
+                            setPromocionesView('list');
+                          }}
+                          style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
+                        >
+                          Volver a la Lista
+                        </button>
+                      </div>
+
+                      {promoError && (
+                        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+                          <span>{promoError}</span>
+                        </div>
+                      )}
+
+                      <form onSubmit={handleSavePromo} className="admin-form" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
+                        <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
+                          <div className="form-group">
+                            <label className="form-label">Nombre de la Promoción</label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Ej. Promo Completo + Bebida"
+                              value={promoNombre}
+                              onChange={(e) => setPromoNombre(e.target.value)}
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label">Precio ($)</label>
+                            <input
+                              type="number"
+                              className="form-input"
+                              placeholder="3500"
+                              value={promoPrecio}
+                              onChange={(e) => setPromoPrecio(e.target.value)}
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label className="form-label">Emoji</label>
+                            <select
+                              className="form-input form-select"
+                              value={promoEmoji}
+                              onChange={(e) => setPromoEmoji(e.target.value)}
+                            >
+                              <option value="🎁">🎁 Regalo / Combo</option>
+                              <option value="🛍️">🛍️ Bolsa Compra</option>
+                              <option value="🏷️">🏷️ Oferta</option>
+                              <option value="✨">✨ Especial</option>
+                              <option value="🔥">🔥 Destacado</option>
+                              <option value="🍔">🍔 Hamburguesa</option>
+                              <option value="🌭">🌭 Completo</option>
+                              <option value="🍟">🍟 Papas Fritas</option>
+                              <option value="🥤">🥤 Bebida</option>
+                              <option value="🍕">🍕 Pizza</option>
+                              <option value="🍗">🍗 Pollo Frito</option>
+                              <option value="🌮">🌮 Taco</option>
+                              <option value="🥪">🥪 Sándwich</option>
+                              <option value="🍩">🍩 Dona</option>
+                              <option value="🍦">🍦 Helado</option>
+                              <option value="🍰">🍰 Pastel</option>
+                              <option value="🍻">🍻 Cervezas</option>
+                              <option value="☕">☕ Café</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <input
+                            type="checkbox"
+                            id="promoActivoCheck"
+                            checked={promoActivo}
+                            onChange={(e) => setPromoActivo(e.target.checked)}
+                          />
+                          <label htmlFor="promoActivoCheck" style={{ fontSize: '0.9rem', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                            Promoción Activa
+                          </label>
+                        </div>
+
+                        {/* Apartado Extra: Productos Fijos de la Promoción (Estética distintiva Esmeralda/Inventario) */}
+                        <div className="form-group" style={{ 
+                          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(5, 150, 105, 0.02) 100%)', 
+                          padding: '1.25rem', 
+                          borderRadius: '14px', 
+                          border: '1px solid rgba(16, 185, 129, 0.25)',
+                          boxShadow: '0 4px 15px rgba(0,0,0,0.05)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span style={{ fontSize: '1.2rem' }}>📌</span>
+                                <label className="form-label" style={{ marginBottom: 0, fontWeight: '700', color: '#10b981', fontSize: '0.95rem' }}>
+                                  Productos Fijos de la Promoción
+                                </label>
+                              </div>
+                              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem', margin: 0 }}>
+                                Productos incluidos automáticamente al vender esta promo (sin selección manual).
+                              </p>
+                            </div>
+                            <span style={{ 
+                              background: 'rgba(16, 185, 129, 0.15)', 
+                              color: '#10b981', 
+                              padding: '0.25rem 0.65rem', 
+                              borderRadius: '20px', 
+                              fontSize: '0.72rem', 
+                              fontWeight: '700',
+                              border: '1px solid rgba(16, 185, 129, 0.3)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.3rem'
+                            }}>
+                              ⚡ Stock Automático
+                            </span>
+                          </div>
+
+                          {promoProductosFijos.length === 0 ? (
+                            <div style={{ 
+                              fontSize: '0.8rem', 
+                              color: 'var(--text-muted)', 
+                              textAlign: 'center', 
+                              padding: '1rem', 
+                              background: 'rgba(0, 0, 0, 0.05)', 
+                              border: '1px dashed rgba(16, 185, 129, 0.2)', 
+                              borderRadius: '10px',
+                              marginBottom: '0.85rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '0.3rem'
+                            }}>
+                              <span style={{ fontSize: '1.4rem' }}>📦</span>
+                              <span>No hay productos fijos en esta promoción aún.</span>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '0.85rem' }}>
+                              {promoProductosFijos.map((pf) => (
+                                <div key={pf.producto_id} style={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: '0.6rem', 
+                                  background: 'var(--item-bg)', 
+                                  padding: '0.4rem 0.75rem', 
+                                  borderRadius: '10px', 
+                                  fontSize: '0.85rem',
+                                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                                  boxShadow: '0 2px 6px rgba(0,0,0,0.06)'
+                                }}>
+                                  <span style={{ 
+                                    background: '#10b981', 
+                                    color: 'white', 
+                                    padding: '0.1rem 0.45rem', 
+                                    borderRadius: '6px', 
+                                    fontWeight: 'bold', 
+                                    fontSize: '0.78rem' 
+                                  }}>
+                                    {pf.cantidad}x
+                                  </span>
+                                  <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{pf.nombre_producto}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => eliminarProductoFijoPromoForm(pf.producto_id)}
+                                    style={{ 
+                                      border: 'none', 
+                                      background: 'rgba(239, 68, 68, 0.1)', 
+                                      color: '#ef4444', 
+                                      cursor: 'pointer', 
+                                      fontSize: '0.8rem', 
+                                      padding: '0.2rem 0.4rem',
+                                      borderRadius: '4px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'all 0.2s ease'
+                                    }}
+                                    title="Quitar producto fijo"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                            <select
+                              className="form-input form-select"
+                              style={{ 
+                                height: '42px', 
+                                fontSize: '0.88rem', 
+                                flex: '1 1 auto', 
+                                minWidth: '180px', 
+                                background: 'var(--input-bg)', 
+                                color: 'var(--text-primary)', 
+                                padding: '0.4rem 0.85rem',
+                                borderRadius: '10px',
+                                border: '1px solid rgba(16, 185, 129, 0.3)'
+                              }}
+                              id="sel-fixed-product"
+                              defaultValue=""
+                            >
+                              <option value="" disabled>-- Seleccionar Producto del Catálogo --</option>
+                              {productos.map(p => (
+                                <option key={p.id} value={p.id}>{p.nombre} (${parseFloat(p.precio)})</option>
+                              ))}
+                            </select>
+                            <input
+                              type="number"
+                              className="form-input"
+                              placeholder="Cant"
+                              defaultValue="1"
+                              min="1"
+                              style={{ 
+                                width: '70px', 
+                                flexShrink: 0, 
+                                height: '42px', 
+                                fontSize: '0.9rem', 
+                                padding: '0.4rem 0.5rem', 
+                                textAlign: 'center',
+                                borderRadius: '10px',
+                                border: '1px solid rgba(16, 185, 129, 0.3)'
+                              }}
+                              id="cant-fixed-product"
+                            />
+                            <button
+                              type="button"
+                              style={{ 
+                                height: '42px', 
+                                width: 'auto', 
+                                flexShrink: 0, 
+                                padding: '0 1.25rem', 
+                                fontSize: '0.88rem', 
+                                fontWeight: 'bold', 
+                                whiteSpace: 'nowrap',
+                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                border: 'none',
+                                borderRadius: '10px',
+                                color: 'white',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onClick={() => {
+                                const sel = document.getElementById('sel-fixed-product');
+                                const cant = document.getElementById('cant-fixed-product');
+                                if (sel && sel.value) {
+                                  agregarProductoFijoPromoForm(sel.value, cant.value || 1);
+                                  sel.value = "";
+                                  cant.value = "1";
+                                }
+                              }}
+                            >
+                              <span>➕ Incluir</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <label className="form-label" style={{ marginBottom: 0 }}>Pasos de Selección (Combo)</label>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={agregarPasoPromoForm}
+                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
+                            >
+                              ➕ Agregar Paso
+                            </button>
+                          </div>
+
+                          {promoPasos.length === 0 ? (
+                            <p style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-secondary)', textAlign: 'center', padding: '1.5rem', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                              Agrega al menos un paso para definir qué productos componen esta promoción.
+                            </p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                              {promoPasos.map((paso, pIdx) => {
+                                const idKey = paso.id || paso.temp_id;
+                                const isReal = !!paso.id;
+                                return (
+                                  <div key={idKey} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', padding: '1rem' }}>
+                                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                                      <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
+                                        #{pIdx + 1}
+                                      </span>
+                                      <input
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="Ej. Elige tu Bebida"
+                                        style={{ flex: 1, height: '32px', fontSize: '0.85rem' }}
+                                        value={paso.nombre_paso}
+                                        onChange={(e) => actualizarNombrePasoForm(idKey, isReal, e.target.value)}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => eliminarPasoPromoForm(idKey, isReal)}
+                                        style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.3rem 0.5rem', borderRadius: '4px' }}
+                                        title="Eliminar Paso"
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+
+                                    {/* Opciones del paso */}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                      <span style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Productos Opcionales en este Paso:</span>
+                                      {paso.opciones.length === 0 ? (
+                                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>No hay opciones agregadas aún.</p>
+                                      ) : (
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                          {paso.opciones.map(opc => (
+                                            <div key={opc.producto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}>
+                                              <span>{opc.nombre_producto}</span>
+                                              {parseFloat(opc.precio_adicional) > 0 && (
+                                                <span style={{ color: 'var(--accent-primary)', fontSize: '0.75rem' }}>
+                                                  (+${parseFloat(opc.precio_adicional)})
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={() => eliminarOpcionDelPasoForm(idKey, isReal, opc.producto_id)}
+                                                style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '0.8rem', padding: '0 0.1rem' }}
+                                              >
+                                                &times;
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      {/* Añadir opción al paso */}
+                                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
+                                        <select
+                                          className="form-input form-select"
+                                          style={{ height: '38px', fontSize: '0.85rem', flex: '1 1 auto', minWidth: '180px', padding: '0.3rem 0.75rem', background: 'var(--input-bg)', color: 'var(--text-primary)' }}
+                                          id={`sel-prod-${idKey}`}
+                                          defaultValue=""
+                                        >
+                                          <option value="" disabled>-- Añadir Producto --</option>
+                                          {productos.map(p => (
+                                            <option key={p.id} value={p.id}>{p.nombre} (${parseFloat(p.precio)})</option>
+                                          ))}
+                                        </select>
+                                        <input
+                                          type="number"
+                                          className="form-input"
+                                          placeholder="Extra $"
+                                          style={{ width: '75px', flexShrink: 0, height: '38px', fontSize: '0.85rem', padding: '0.3rem 0.5rem', textAlign: 'center' }}
+                                          id={`extra-price-${idKey}`}
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn-primary"
+                                          style={{ height: '38px', width: 'auto', flexShrink: 0, padding: '0 1rem', fontSize: '0.85rem', fontWeight: '600', whiteSpace: 'nowrap' }}
+                                          onClick={() => {
+                                            const sel = document.getElementById(`sel-prod-${idKey}`);
+                                            const extra = document.getElementById(`extra-price-${idKey}`);
+                                            if (sel && sel.value) {
+                                              agregarOpcionAlPasoForm(idKey, isReal, sel.value, extra.value || 0);
+                                              sel.value = "";
+                                              extra.value = "";
+                                            }
+                                          }}
+                                        >
+                                          Añadir
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="btn-primary"
+                          style={{ width: '100%', height: '40px', marginTop: '1rem' }}
+                          disabled={promoLoading}
+                        >
+                          {promoLoading ? 'Guardando...' : 'Guardar Promoción'}
+                        </button>
+                      </form>
+                    </>
+                  )}
+                </div>
+
+                {/* Listado de Promociones (Derecha) */}
+                <div className="admin-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div className="admin-card-header">
+                    <h3 className="section-title">📋 Promociones Configuradas</h3>
+                    <p className="section-subtitle">Gestión de combos y promociones disponibles en el sistema</p>
+                  </div>
+
+                  {promocionesLoading && (
+                    <div className="loading-container" style={{ marginTop: '2rem' }}>
+                      <div className="spinner"></div>
+                      <span>Cargando promociones...</span>
+                    </div>
+                  )}
+
+                  {!promocionesLoading && promoError && (
+                    <div className="alert alert-error" style={{ margin: '1rem 0' }}>
+                      <span>{promoError}</span>
+                    </div>
+                  )}
+
+                  {!promocionesLoading && !promoError && promociones.length === 0 && (
+                    <p className="empty-catalog" style={{ textAlign: 'center', marginTop: '3rem' }}>
+                      No hay promociones registradas aún.
+                    </p>
+                  )}
+
+                  {!promocionesLoading && !promoError && promociones.length > 0 && (
+                    <div className="users-list-container" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
+                      {promociones.map((promo) => (
+                        <div key={promo.id} className="user-list-item" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', border: '1px solid rgba(255,255,255,0.03)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <span style={{ fontSize: '1.25rem' }}>{promo.emoji || '🎁'}</span>
+                              <span className="user-list-name" style={{ fontWeight: '700', fontSize: '1rem' }}>
+                                {promo.nombre}
+                              </span>
+                              <span className={`badge ${promo.activo !== false ? 'badge-admin' : ''}`} style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+                                {promo.activo !== false ? 'Activo' : 'Inactivo'}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                              <span className="badge" style={{ background: 'rgba(255,255,255,0.06)', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 'bold' }}>
+                                ${parseFloat(promo.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => iniciarEdicionPromo(promo)}
+                                className="btn-edit-user"
+                                title="Editar promoción"
+                                style={{ padding: '0.2rem', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePromo(promo.id, promo.nombre)}
+                                className="btn-delete-user"
+                                title="Eliminar promoción"
+                                style={{ padding: '0.2rem', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Mostrar resumen de productos fijos */}
+                          {promo.productos_fijos && promo.productos_fijos.length > 0 && (
+                            <div style={{ paddingLeft: '1.75rem', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                              <strong style={{ color: 'var(--accent-primary)' }}>📌 Incluye Fijo: </strong>
+                              <span style={{ color: 'var(--text-primary)' }}>
+                                {promo.productos_fijos.map(pf => `${pf.cantidad}x ${pf.nombre_producto}`).join(', ')}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Mostrar resumen de los pasos de la promo */}
+                          {promo.pasos && promo.pasos.length > 0 && (
+                            <div style={{ paddingLeft: '1.75rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                              {promo.pasos.map((paso, idx) => (
+                                <div key={paso.id} style={{ marginTop: '0.25rem' }}>
+                                  <strong style={{ color: 'var(--text-primary)' }}>Paso {idx + 1}: {paso.nombre_paso}</strong>
+                                  <span style={{ color: 'var(--text-muted)' }}>
+                                    {' '}({paso.opciones.map(o => o.nombre_producto).join(', ')})
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2618,7 +3780,7 @@ function App() {
                                 <span className="badge" style={{
                                   background: ped.tipo_entrega === 'Llevar' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
                                   border: ped.tipo_entrega === 'Llevar' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
-                                  color: ped.tipo_entrega === 'Llevar' ? '#fca5a5' : '#a7f3d0',
+                                  color: ped.tipo_entrega === 'Llevar' ? (isDark ? '#fca5a5' : '#dc2626') : (isDark ? '#a7f3d0' : '#047857'),
                                   fontSize: '0.75rem',
                                   padding: '0.15rem 0.5rem'
                                 }}>
@@ -2636,10 +3798,10 @@ function App() {
                                       ? '1px solid rgba(16, 185, 129, 0.3)' 
                                       : '1px solid rgba(234, 179, 8, 0.3)',
                                   color: ped.tipo_transaccion === 'Crédito' 
-                                    ? '#93c5fd' 
+                                    ? (isDark ? '#93c5fd' : '#1d4ed8') 
                                     : ped.tipo_transaccion === 'Débito' 
-                                      ? '#a7f3d0' 
-                                      : '#fef08a',
+                                      ? (isDark ? '#a7f3d0' : '#047857') 
+                                      : (isDark ? '#fef08a' : '#b45309'),
                                   fontSize: '0.75rem',
                                   padding: '0.15rem 0.5rem'
                                 }}>
@@ -3099,6 +4261,102 @@ function App() {
                           </div>
                         </div>
                       )}
+
+                      {/* Configuración de Correo de Recepción */}
+                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)', marginTop: '1rem' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          📬 Correo de Recepción de Reportes
+                        </h4>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                          Ingresa el correo destinatario que recibirá los reportes de inventario y cierres de caja.
+                        </p>
+
+                        <form onSubmit={guardarConfiguracion} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Correo Destinatario (Para)</label>
+                            <input
+                              type="email"
+                              className="form-input"
+                              placeholder="ejemplo@correo.com"
+                              value={configEmailTo}
+                              onChange={(e) => setConfigEmailTo(e.target.value)}
+                              required
+                              style={{
+                                padding: '0.5rem 1rem',
+                                fontSize: '0.95rem',
+                                height: '38px',
+                                color: 'var(--text-primary)',
+                                background: 'var(--input-bg)',
+                                border: '1px solid var(--glass-border)',
+                                borderRadius: '12px',
+                                width: '100%'
+                              }}
+                            />
+                          </div>
+
+                          {configSuccess && (
+                            <div className="alert alert-success" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}>
+                              <span>{configSuccess}</span>
+                            </div>
+                          )}
+                          {configError && (
+                            <div className="alert alert-error" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}>
+                              <span>{configError}</span>
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                            <button type="submit" className="btn-primary" style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }} disabled={configLoading}>
+                              {configLoading ? 'Guardando...' : '💾 Guardar Correo'}
+                            </button>
+                            
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                              disabled={configLoading}
+                              onClick={async () => {
+                                try {
+                                  setConfigLoading(true);
+                                  setConfigSuccess('');
+                                  setConfigError('');
+                                  
+                                  const config = {
+                                    REPORT_EMAIL_TO: configEmailTo
+                                  };
+
+                                  let saveResponse = await fetch('http://127.0.0.1:5000/api/configuracion', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ config })
+                                  });
+                                  
+                                  if (!saveResponse.ok) {
+                                    throw new Error('Error al guardar el correo.');
+                                  }
+
+                                  const response = await fetch('http://127.0.0.1:5000/api/reportes/enviar', {
+                                    method: 'POST'
+                                  });
+                                  const data = await response.json();
+                                  if (response.ok && data.success) {
+                                    setConfigSuccess('¡Reporte de prueba enviado!');
+                                  } else {
+                                    setConfigError(data.message || 'Error al enviar correo de prueba.');
+                                  }
+                                } catch (err) {
+                                  console.error(err);
+                                  setConfigError(err.message || 'Error de red al enviar correo de prueba.');
+                                } finally {
+                                  setConfigLoading(false);
+                                }
+                              }}
+                            >
+                              {configLoading ? 'Enviando...' : '📧 Probar Envío'}
+                            </button>
+                          </div>
+                        </form>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3309,6 +4567,8 @@ function App() {
                 </div>
               </div>
             )}
+
+
 
             {/* Modal Overlay / Comanda / etc. */}
           </div>
@@ -3530,15 +4790,69 @@ function App() {
           </div>
         </div>
       )}
+
+      {showPromoSelectorModal && selectedPromo && (
+        <div className="custom-modal-overlay">
+          <div className="custom-modal" style={{ maxWidth: '480px', width: '90%', padding: '1.75rem' }}>
+            <div className="custom-modal-header" style={{ marginBottom: '1.25rem' }}>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                {selectedPromo.emoji || '🎁'} Configurar Promoción: {selectedPromo.nombre}
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--accent-primary)', fontWeight: '700', marginTop: '0.35rem' }}>
+                Paso {currentPromoStepIndex + 1} de {selectedPromo.pasos.length}: {selectedPromo.pasos[currentPromoStepIndex].nombre_paso}
+              </p>
+            </div>
+            
+            <div className="custom-modal-body" style={{ maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.25rem' }}>
+              {selectedPromo.pasos[currentPromoStepIndex].opciones.map((opc) => (
+                <button
+                  key={opc.id}
+                  type="button"
+                  className="custom-modal-option"
+                  onClick={() => seleccionarOpcionPaso(opc)}
+                >
+                  <span style={{ fontWeight: '600' }}>{opc.nombre_producto}</span>
+                  {parseFloat(opc.precio_adicional) > 0 && (
+                    <span style={{ fontSize: '0.8rem', background: 'rgba(234, 88, 12, 0.15)', color: 'var(--accent-primary)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontWeight: 'bold' }}>
+                      +${parseFloat(opc.precio_adicional).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            
+            <div className="custom-modal-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  if (currentPromoStepIndex > 0) {
+                    setCurrentPromoStepIndex(currentPromoStepIndex - 1);
+                    setChosenPromoOpciones(chosenPromoOpciones.slice(0, -1));
+                  } else {
+                    setShowPromoSelectorModal(false);
+                    setSelectedPromo(null);
+                  }
+                }}
+              >
+                {currentPromoStepIndex > 0 ? 'Volver' : 'Cancelar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
-      <button 
-        type="button"
-        onClick={() => setIsDark(!isDark)} 
-        className="theme-toggle"
-        title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-      >
-        {isDark ? '☀️ Claro' : '🌙 Oscuro'}
-      </button>
+      {!user && (
+        <button 
+          type="button"
+          onClick={() => setIsDark(!isDark)} 
+          className="theme-toggle"
+          title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+        >
+          {isDark ? '☀️ Claro' : '🌙 Oscuro'}
+        </button>
+      )}
     </>
   );
 }

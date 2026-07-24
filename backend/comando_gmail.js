@@ -2,31 +2,62 @@ const nodemailer = require('nodemailer');
 const pool = require('./db');
 require('dotenv').config();
 
-// Remitente y destinatarios configurables (vacíos por defecto)
-const DEFAULT_EMAIL_TO = process.env.REPORT_EMAIL_TO || '';     
-const DEFAULT_EMAIL_FROM = process.env.REPORT_EMAIL_FROM || ''; 
+// Remitente emisor fijo (inglesnaipe61@gmail.com por defecto desde .env)
+let DEFAULT_EMAIL_TO = process.env.REPORT_EMAIL_TO || '';     
+let DEFAULT_EMAIL_FROM = process.env.REPORT_EMAIL_FROM || 'inglesnaipe61@gmail.com'; 
+let SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+let SMTP_PORT = parseInt(process.env.SMTP_PORT || '587');
+let SMTP_SECURE = process.env.SMTP_SECURE === 'true';
+let SMTP_USER = process.env.SMTP_USER || 'inglesnaipe61@gmail.com';
+let SMTP_PASS = process.env.SMTP_PASS || '';
+
+// Cargar únicamente la dirección destinatario de la base de datos
+const loadConfigFromDB = async () => {
+  try {
+    const res = await pool.query('SELECT clave, valor FROM configuracion');
+    const dbConfig = {};
+    res.rows.forEach(row => {
+      dbConfig[row.clave] = row.valor;
+    });
+
+    if (dbConfig.REPORT_EMAIL_TO) DEFAULT_EMAIL_TO = dbConfig.REPORT_EMAIL_TO;
+    if (dbConfig.REPORT_EMAIL_FROM) DEFAULT_EMAIL_FROM = dbConfig.REPORT_EMAIL_FROM;
+
+    console.log('INFO: Configuración de correo cargada desde la base de datos.');
+  } catch (err) {
+    console.log('WARN: No se pudo cargar la configuración de la DB, usando fallback de .env:', err.message);
+  }
+};
 
 // Configuración SMTP para nodemailer
 const getTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'localhost',
-    port: parseInt(process.env.SMTP_PORT || '1025'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-      user: process.env.SMTP_USER || '',
-      pass: process.env.SMTP_PASS || ''
+  const transportOptions = {
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    tls: {
+      rejectUnauthorized: false
     }
-  });
+  };
+
+  if (SMTP_USER || SMTP_PASS) {
+    transportOptions.auth = {
+      user: SMTP_USER || DEFAULT_EMAIL_FROM,
+      pass: SMTP_PASS
+    };
+  }
+
+  return nodemailer.createTransport(transportOptions);
 };
 
 // Función auxiliar para enviar correos
 const sendEmail = async (toEmail, subject, htmlBody, attachments = []) => {
   if (!toEmail) {
-    console.log('WARN: No se especificó dirección de correo destinatario. Saltando envío.');
+    console.error('ERROR: No se especificó dirección de correo destinatario. Saltando envío.');
     return false;
   }
   if (!DEFAULT_EMAIL_FROM) {
-    console.log('WARN: No se configuró el remitente (DEFAULT_EMAIL_FROM). Saltando envío.');
+    console.error('ERROR: No se configuró el remitente (DEFAULT_EMAIL_FROM). Saltando envío.');
     return false;
   }
 
@@ -39,7 +70,7 @@ const sendEmail = async (toEmail, subject, htmlBody, attachments = []) => {
     attachments: attachments // formato: [{ filename: 'archivo.xlsx', path: 'ruta/al/archivo' }]
   };
 
-  console.log(`INFO: Enviando correo a ${toEmail}...`);
+  console.log(`INFO: Enviando correo a ${toEmail} desde ${DEFAULT_EMAIL_FROM}...`);
   try {
     const info = await transporter.sendMail(mailOptions);
     console.log(`INFO: Correo enviado correctamente: ${info.messageId}`);
@@ -53,6 +84,9 @@ const sendEmail = async (toEmail, subject, htmlBody, attachments = []) => {
 // Función de ejecución principal (el cuerpo de la lógica se construirá desde aquí)
 const run = async () => {
   try {
+    // 0. Cargar la configuración dinámica de la base de datos
+    await loadConfigFromDB();
+
     console.log('INFO: Iniciando consulta de inventario...');
 
     // 1. Consultar ingredientes y stock en la base de datos
@@ -102,9 +136,11 @@ const run = async () => {
 
     if (success) {
       console.log('INFO: Reporte de inventario enviado correctamente.');
+      process.exit(0);
+    } else {
+      console.error('ERROR: No se pudo enviar el reporte por correo.');
+      process.exit(1);
     }
-
-    process.exit(0);
   } catch (err) {
     console.error(`ERROR: Ocurrió un error inesperado: ${err.stack}`);
     process.exit(1);

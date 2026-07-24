@@ -26,6 +26,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
       )
     `);
     await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🏷️'");
+    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS orden INT DEFAULT 0");
     console.log("✅ Tabla 'categorias' asegurada.");
 
     // 3. Asegurar tabla pedidos
@@ -84,6 +85,51 @@ app.use(express.json()); // Permite procesar peticiones JSON
       )
     `);
     console.log("✅ Tabla 'cierres_caja' asegurada.");
+
+    // 7. Asegurar tablas de promociones
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS promociones (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(150) UNIQUE NOT NULL,
+        precio DECIMAL(10, 2) NOT NULL,
+        activo BOOLEAN DEFAULT TRUE
+      )
+    `);
+    await pool.query("ALTER TABLE promociones ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🎁'");
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS promocion_pasos (
+        id SERIAL PRIMARY KEY,
+        promocion_id INTEGER REFERENCES promociones(id) ON DELETE CASCADE,
+        nombre_paso VARCHAR(150) NOT NULL,
+        obligatorio BOOLEAN DEFAULT TRUE
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS promocion_opciones (
+        id SERIAL PRIMARY KEY,
+        promocion_paso_id INTEGER REFERENCES promocion_pasos(id) ON DELETE CASCADE,
+        producto_id INTEGER REFERENCES productos(id) ON DELETE CASCADE,
+        precio_adicional DECIMAL(10, 2) DEFAULT 0.00
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS promocion_productos_fijos (
+        id SERIAL PRIMARY KEY,
+        promocion_id INTEGER REFERENCES promociones(id) ON DELETE CASCADE,
+        producto_id INTEGER REFERENCES productos(id) ON DELETE CASCADE,
+        cantidad INTEGER DEFAULT 1
+      )
+    `);
+    console.log("✅ Tablas de promociones ('promociones', 'promocion_productos_fijos', 'promocion_pasos', 'promocion_opciones') aseguradas.");
+
+    // 8. Asegurar tabla configuracion
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracion (
+        clave VARCHAR(100) PRIMARY KEY,
+        valor TEXT NOT NULL
+      )
+    `);
+    console.log("✅ Tabla 'configuracion' asegurada.");
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
@@ -244,6 +290,214 @@ app.get('/api/productos', async (req, res) => {
       success: false,
       message: 'Error al obtener los productos de la base de datos.'
     });
+  }
+});
+
+
+// Endpoint de Obtener Promociones
+app.get('/api/promociones', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        pr.id,
+        pr.nombre,
+        pr.precio,
+        pr.activo,
+        pr.emoji,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', pf.id,
+                'producto_id', pf.producto_id,
+                'nombre_producto', prod_fijo.nombre,
+                'precio_producto', prod_fijo.precio,
+                'cantidad', pf.cantidad
+              )
+              ORDER BY pf.id ASC
+            )
+            FROM promocion_productos_fijos pf
+            JOIN productos prod_fijo ON pf.producto_id = prod_fijo.id
+            WHERE pf.promocion_id = pr.id
+          ),
+          '[]'::json
+        ) AS productos_fijos,
+        COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', pa.id,
+                'nombre_paso', pa.nombre_paso,
+                'obligatorio', pa.obligatorio,
+                'opciones', COALESCE(
+                  (
+                    SELECT json_agg(
+                      json_build_object(
+                        'id', op.id,
+                        'producto_id', op.producto_id,
+                        'precio_adicional', op.precio_adicional,
+                        'nombre_producto', prod.nombre,
+                        'precio_producto', prod.precio
+                      )
+                    )
+                    FROM promocion_opciones op
+                    JOIN productos prod ON op.producto_id = prod.id
+                    WHERE op.promocion_paso_id = pa.id
+                  ),
+                  '[]'::json
+                )
+              )
+              ORDER BY pa.id ASC
+            )
+            FROM promocion_pasos pa
+            WHERE pa.promocion_id = pr.id
+          ),
+          '[]'::json
+        ) AS pasos
+      FROM promociones pr
+      ORDER BY pr.id ASC;
+    `;
+    const result = await pool.query(query);
+    res.json({ success: true, promociones: result.rows });
+  } catch (err) {
+    console.error('Error en GET /api/promociones:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener promociones.' });
+  }
+});
+
+// Endpoint de Crear Promoción
+app.post('/api/promociones', async (req, res) => {
+  const { nombre, precio, pasos, productos_fijos, emoji } = req.body;
+  if (!nombre || precio === undefined) {
+    return res.status(400).json({ success: false, message: 'Nombre y precio son obligatorios.' });
+  }
+  
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const promoRes = await client.query(
+      'INSERT INTO promociones (nombre, precio, emoji) VALUES ($1, $2, $3) RETURNING id',
+      [nombre.trim(), precio, emoji || '🎁']
+    );
+    const promoId = promoRes.rows[0].id;
+    
+    // Insertar productos fijos
+    if (productos_fijos && Array.isArray(productos_fijos)) {
+      for (const pf of productos_fijos) {
+        if (pf.producto_id) {
+          await client.query(
+            'INSERT INTO promocion_productos_fijos (promocion_id, producto_id, cantidad) VALUES ($1, $2, $3)',
+            [promoId, pf.producto_id, parseInt(pf.cantidad) || 1]
+          );
+        }
+      }
+    }
+
+    // Insertar pasos y opciones
+    if (pasos && Array.isArray(pasos)) {
+      for (const paso of pasos) {
+        const pasoRes = await client.query(
+          'INSERT INTO promocion_pasos (promocion_id, nombre_paso, obligatorio) VALUES ($1, $2, $3) RETURNING id',
+          [promoId, paso.nombre_paso.trim(), paso.obligatorio !== false]
+        );
+        const pasoId = pasoRes.rows[0].id;
+        
+        if (paso.opciones && Array.isArray(paso.opciones)) {
+          for (const opcion of paso.opciones) {
+            await client.query(
+              'INSERT INTO promocion_opciones (promocion_paso_id, producto_id, precio_adicional) VALUES ($1, $2, $3)',
+              [pasoId, opcion.producto_id, opcion.precio_adicional || 0.00]
+            );
+          }
+        }
+      }
+    }
+    
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Promoción creada con éxito.', id: promoId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en POST /api/promociones:', err.message);
+    res.status(500).json({ success: false, message: 'Error al crear la promoción.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Endpoint de Editar Promoción
+app.put('/api/promociones/:id', async (req, res) => {
+  const { id } = req.params;
+  const { nombre, precio, activo, pasos, productos_fijos, emoji } = req.body;
+  
+  if (!nombre || precio === undefined) {
+    return res.status(400).json({ success: false, message: 'Nombre y precio son obligatorios.' });
+  }
+  
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    await client.query(
+      'UPDATE promociones SET nombre = $1, precio = $2, activo = $3, emoji = $4 WHERE id = $5',
+      [nombre.trim(), precio, activo !== false, emoji || '🎁', id]
+    );
+    
+    // Borrar productos fijos antiguos e reinsertar
+    await client.query('DELETE FROM promocion_productos_fijos WHERE promocion_id = $1', [id]);
+    if (productos_fijos && Array.isArray(productos_fijos)) {
+      for (const pf of productos_fijos) {
+        if (pf.producto_id) {
+          await client.query(
+            'INSERT INTO promocion_productos_fijos (promocion_id, producto_id, cantidad) VALUES ($1, $2, $3)',
+            [id, pf.producto_id, parseInt(pf.cantidad) || 1]
+          );
+        }
+      }
+    }
+
+    // Borrar pasos antiguos (las opciones se borran en cascada automáticamente)
+    await client.query('DELETE FROM promocion_pasos WHERE promocion_id = $1', [id]);
+    
+    if (pasos && Array.isArray(pasos)) {
+      for (const paso of pasos) {
+        const pasoRes = await client.query(
+          'INSERT INTO promocion_pasos (promocion_id, nombre_paso, obligatorio) VALUES ($1, $2, $3) RETURNING id',
+          [id, paso.nombre_paso.trim(), paso.obligatorio !== false]
+        );
+        const pasoId = pasoRes.rows[0].id;
+        
+        if (paso.opciones && Array.isArray(paso.opciones)) {
+          for (const opcion of paso.opciones) {
+            await client.query(
+              'INSERT INTO promocion_opciones (promocion_paso_id, producto_id, precio_adicional) VALUES ($1, $2, $3)',
+              [pasoId, opcion.producto_id, opcion.precio_adicional || 0.00]
+            );
+          }
+        }
+      }
+    }
+    
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Promoción actualizada con éxito.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en PUT /api/promociones:', err.message);
+    res.status(500).json({ success: false, message: 'Error al actualizar la promoción.' });
+  } finally {
+    client.release();
+  }
+});
+
+// Endpoint de Eliminar Promoción
+app.delete('/api/promociones/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM promociones WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Promoción eliminada con éxito.' });
+  } catch (err) {
+    console.error('Error en DELETE /api/promociones:', err.message);
+    res.status(500).json({ success: false, message: 'Error al eliminar la promoción.' });
   }
 });
 
@@ -631,7 +885,7 @@ app.delete('/api/ingredientes/:id', async (req, res) => {
 // Endpoint de Obtener Categorías
 app.get('/api/categorias', async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, nombre, emoji FROM categorias ORDER BY nombre ASC');
+    const result = await pool.query('SELECT id, nombre, emoji, orden FROM categorias ORDER BY orden ASC, nombre ASC');
     res.json({
       success: true,
       categorias: result.rows
@@ -662,9 +916,11 @@ app.post('/api/categorias', async (req, res) => {
         message: 'La categoría ya existe.'
       });
     }
+    const maxRes = await pool.query('SELECT COALESCE(MAX(orden), 0) as max_order FROM categorias');
+    const nextOrder = parseInt(maxRes.rows[0].max_order, 10) + 1;
     const result = await pool.query(
-      'INSERT INTO categorias (nombre, emoji) VALUES ($1, $2) RETURNING id, nombre, emoji',
-      [nombre.trim(), emoji ? emoji.trim() : '🏷️']
+      'INSERT INTO categorias (nombre, emoji, orden) VALUES ($1, $2, $3) RETURNING id, nombre, emoji, orden',
+      [nombre.trim(), emoji ? emoji.trim() : '🏷️', nextOrder]
     );
     res.status(201).json({
       success: true,
@@ -783,6 +1039,40 @@ app.delete('/api/categorias/:id', async (req, res) => {
   }
 });
 
+// Endpoint de Reordenar Categorías
+app.post('/api/categorias/reordenar', async (req, res) => {
+  const { ordenamiento } = req.body;
+  if (!Array.isArray(ordenamiento)) {
+    return res.status(400).json({
+      success: false,
+      message: 'El formato de ordenamiento es inválido.'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (let i = 0; i < ordenamiento.length; i++) {
+      const catId = ordenamiento[i];
+      await client.query('UPDATE categorias SET orden = $1 WHERE id = $2', [i, catId]);
+    }
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: 'Orden de categorías actualizado correctamente.'
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en POST /api/categorias/reordenar:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al actualizar el orden de las categorías.'
+    });
+  } finally {
+    client.release();
+  }
+});
+
 // Endpoint de Registrar Pedido
 app.post('/api/pedidos', async (req, res) => {
   const { cliente_nombre, total, atendido_por, productos, nota, tipo_entrega, tipo_transaccion } = req.body;
@@ -814,8 +1104,47 @@ app.post('/api/pedidos', async (req, res) => {
         [pedidoId, item.id || null, item.nombre, item.cantidad, item.precio]
       );
 
-      // Descontar stock si el producto tiene ingredientes asociados
-      if (item.id) {
+      // Descontar stock si el producto es una promoción (productos fijos u opciones elegidas) o producto normal
+      if (item.opciones_elegidas || item.productos_fijos) {
+        // 1. Descontar ingredientes de Productos Fijos de la promoción
+        if (item.productos_fijos && Array.isArray(item.productos_fijos)) {
+          for (const prodFijo of item.productos_fijos) {
+            if (prodFijo.producto_id) {
+              const recipeRes = await client.query(
+                'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
+                [prodFijo.producto_id]
+              );
+              for (const recipeItem of recipeRes.rows) {
+                const discountAmount = parseFloat(recipeItem.cantidad) * (parseInt(prodFijo.cantidad) || 1) * item.cantidad;
+                await client.query(
+                  'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+                  [discountAmount, recipeItem.ingrediente_id]
+                );
+              }
+            }
+          }
+        }
+
+        // 2. Descontar ingredientes de Opciones Elegidas en los pasos de la promoción
+        if (item.opciones_elegidas && Array.isArray(item.opciones_elegidas)) {
+          for (const opcion of item.opciones_elegidas) {
+            if (opcion.producto_id) {
+              const recipeRes = await client.query(
+                'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
+                [opcion.producto_id]
+              );
+              for (const recipeItem of recipeRes.rows) {
+                const discountAmount = parseFloat(recipeItem.cantidad) * item.cantidad;
+                await client.query(
+                  'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+                  [discountAmount, recipeItem.ingrediente_id]
+                );
+              }
+            }
+          }
+        }
+      } else if (item.id) {
+        // Es un producto normal, descontar ingredientes del producto base
         const recipeRes = await client.query(
           'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
           [item.id]
@@ -1225,6 +1554,96 @@ app.get('/api/informes/rango-productos/excel', async (req, res) => {
   }
 });
 
+// Endpoint de Obtener Configuración
+app.get('/api/configuracion', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT clave, valor FROM configuracion');
+    const configMap = {};
+    result.rows.forEach(row => {
+      configMap[row.clave] = row.valor;
+    });
+    res.json({ success: true, config: configMap });
+  } catch (err) {
+    console.error('Error en GET /api/configuracion:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener la configuración.' });
+  }
+});
+
+// Endpoint de Guardar Configuración
+app.post('/api/configuracion', async (req, res) => {
+  const { config } = req.body;
+  if (!config || typeof config !== 'object') {
+    return res.status(400).json({ success: false, message: 'La configuración provista no es válida.' });
+  }
+
+  try {
+    await pool.query('BEGIN');
+    for (const [clave, valor] of Object.entries(config)) {
+      await pool.query(`
+        INSERT INTO configuracion (clave, valor)
+        VALUES ($1, $2)
+        ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
+      `, [clave, String(valor)]);
+    }
+    await pool.query('COMMIT');
+    res.json({ success: true, message: 'Configuración guardada correctamente.' });
+  } catch (err) {
+    await pool.query('ROLLBACK');
+    console.error('Error en POST /api/configuracion:', err.message);
+    res.status(500).json({ success: false, message: 'Error al guardar la configuración.' });
+  }
+});
+
+// Endpoint de Enviar Reporte de Inventario por Correo
+app.post('/api/reportes/enviar', async (req, res) => {
+  const { fork } = require('child_process');
+  const path = require('path');
+  try {
+    const scriptPath = path.join(__dirname, 'comando_gmail.js');
+    console.log(`[Backend] Ejecutando envío de correo de inventario usando fork: ${scriptPath}`);
+    
+    const child = fork(scriptPath, [], {
+      env: { ...process.env }
+    });
+    
+    let hasResponded = false;
+
+    child.on('error', (err) => {
+      console.error('[Backend] Error al ejecutar comando_gmail.js:', err);
+      if (!hasResponded) {
+        hasResponded = true;
+        res.status(500).json({
+          success: false,
+          message: 'Error al ejecutar script de correo: ' + err.message
+        });
+      }
+    });
+    
+    child.on('exit', (code) => {
+      console.log(`[Backend] comando_gmail.js finalizado con código: ${code}`);
+      if (!hasResponded) {
+        hasResponded = true;
+        if (code === 0) {
+          res.json({
+            success: true,
+            message: 'Reporte de inventario enviado correctamente al correo.'
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            message: 'Error al enviar correo de reporte. Verifique el correo destinatario/remitente y la configuración de contraseña SMTP.'
+          });
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Error en POST /api/reportes/enviar:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al iniciar el envío del reporte.'
+    });
+  }
+});
 
 // Iniciar servidor
 app.listen(PORT, () => {

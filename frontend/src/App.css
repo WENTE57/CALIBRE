@@ -60,10 +60,10 @@
 /* App Container */
 .app-container {
   width: 100%;
-  max-width: 1250px;
+  max-width: 100%;
   height: 100vh;
   max-height: 100vh;
-  padding: 1rem;
+  padding: 0.5rem;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -149,16 +149,24 @@
   align-items: center;
 }
 
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
 .input-icon {
   position: absolute;
   left: 1rem;
   color: var(--text-muted);
   pointer-events: none;
+  z-index: 2;
 }
 
 .form-input {
   width: 100%;
-  padding: 0.85rem 1rem 0.85rem 2.5rem;
+  padding: 0.65rem 0.85rem;
   background: var(--input-bg);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
@@ -166,6 +174,10 @@
   font-family: inherit;
   font-size: 0.95rem;
   transition: all 0.3s ease;
+}
+
+.input-wrapper .form-input {
+  padding-left: 2.5rem !important;
 }
 
 .form-input:focus {
@@ -268,10 +280,10 @@
 
 /* Dashboard View */
 .dashboard-card {
-  max-width: 750px;
+  max-width: 100%;
   width: 100%;
-  height: calc(100vh - 2rem);
-  max-height: calc(100vh - 2rem);
+  height: 100%;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -356,6 +368,11 @@
   color: var(--accent-primary-hover);
 }
 
+.btn-secondary:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 /* Dashboard Body grid */
 .dashboard-grid {
   display: grid;
@@ -431,13 +448,21 @@
 
 /* Custom styling for select element to match other inputs */
 .form-select {
-  appearance: none;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fed7aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 1rem center;
-  background-size: 1.2em;
-  padding-right: 2.5rem !important;
+  appearance: auto;
+  padding-left: 0.65rem !important;
+  color: var(--text-primary) !important;
+  background-color: var(--input-bg);
   cursor: pointer;
+}
+
+.form-select option {
+  background-color: #ffffff;
+  color: #1a0f08;
+}
+
+body.dark-theme .form-select option {
+  background-color: #1e0f08;
+  color: #fffbeb;
 }
 
 .btn-admin-submit {
@@ -515,7 +540,7 @@
 
 /* POS Container */
 .pos-card {
-  max-width: 1250px !important;
+  max-width: 100% !important;
   width: 100%;
 }
 
@@ -1294,11 +1319,13 @@
 }
 
 .category-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  width: 180px;
-  min-width: 160px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-auto-rows: min-content;
+  align-content: start;
+  gap: 0.5rem;
+  width: 350px;
+  min-width: 330px;
   overflow-y: auto;
   padding-right: 0.5rem;
   background: rgba(255, 255, 255, 0.01);
@@ -1321,16 +1348,20 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
+.category-sidebar-btn * {
+  pointer-events: none;
+}
+
 .category-sidebar-btn {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   background: var(--item-bg);
   border: 1px solid var(--glass-border);
   border-radius: 12px;
-  padding: 0.85rem 1rem;
+  padding: 0.7rem 0.8rem;
   color: var(--text-secondary);
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 600;
   text-align: left;
   cursor: pointer;
@@ -1342,7 +1373,7 @@
 .category-sidebar-btn:hover {
   background: var(--item-bg-hover);
   color: var(--text-primary);
-  transform: translateX(3px);
+  transform: scale(1.02);
   border-color: rgba(255, 255, 255, 0.15);
 }
 
@@ -1351,7 +1382,23 @@
   border-color: transparent;
   color: white;
   box-shadow: 0 4px 12px var(--accent-glow);
-  transform: translateX(5px);
+  transform: scale(1.03);
+}
+
+.category-sidebar-btn.draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.category-sidebar-btn.draggable:active {
+  cursor: grabbing;
+}
+
+.category-sidebar-btn.dragging {
+  opacity: 0.4;
+  border: 1px dashed var(--accent-primary, #ef4444);
+  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .category-sidebar-btn .category-btn-icon {
@@ -1790,7 +1837,38 @@
   box-shadow: 0 4px 12px var(--accent-glow);
 }
 
-/* Theme Toggle Button */
+/* Theme Toggle Buttons */
+.theme-toggle-header {
+  background: var(--item-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: var(--text-primary);
+  padding: 0.55rem 0.95rem;
+  border-radius: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.theme-toggle-header:hover {
+  background: var(--item-bg-hover);
+  transform: translateY(-1px);
+  border-color: var(--accent-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.theme-toggle-header:active {
+  transform: translateY(0);
+}
+
 .theme-toggle {
   position: fixed;
   top: 1.25rem;
@@ -1897,6 +1975,100 @@
   border-radius: 8px;
   font-size: 0.85rem;
   border-left: 3px solid var(--accent-primary);
+}
+
+.cierre-item-name {
+  font-weight: 500;
+}
+
+/* ==========================================
+   MODALS AND POPUPS STYLING (LIGHT & DARK THEMES)
+   ========================================== */
+.custom-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.custom-modal-card, .custom-modal {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  box-shadow: var(--card-shadow);
+  color: var(--text-primary);
+  width: 90%;
+  max-width: 480px;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* High-contrast modal styling for Light Theme */
+body:not(.dark-theme) .custom-modal-card,
+body:not(.dark-theme) .custom-modal {
+  background: #fff8ee !important; /* Cream warm background */
+  border: 1px solid rgba(234, 88, 12, 0.35) !important;
+  box-shadow: 0 20px 60px rgba(42, 23, 8, 0.25) !important;
+  color: #2a1708 !important;
+}
+
+body:not(.dark-theme) .custom-modal-title,
+body:not(.dark-theme) .custom-modal-header h3 {
+  color: #2a1708 !important;
+  font-weight: 800 !important;
+}
+
+body:not(.dark-theme) .custom-modal-header p,
+body:not(.dark-theme) .custom-modal-subtitle {
+  color: #ea580c !important; /* Crisp Hermès orange */
+  font-weight: 700 !important;
+}
+
+/* Modal option buttons in Promo Selector and Modals */
+.custom-modal-option-btn, .custom-modal-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.85rem 1.15rem;
+  text-align: left;
+  width: 100%;
+  background: var(--item-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+body:not(.dark-theme) .custom-modal-option-btn,
+body:not(.dark-theme) .custom-modal-option {
+  background: #ffffff !important;
+  border: 1.5px solid rgba(234, 88, 12, 0.25) !important;
+  color: #2a1708 !important;
+  box-shadow: 0 3px 10px rgba(42, 23, 8, 0.06) !important;
+}
+
+body:not(.dark-theme) .custom-modal-option-btn:hover,
+body:not(.dark-theme) .custom-modal-option:hover {
+  border-color: #ea580c !important;
+  background: #fff3e6 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(234, 88, 12, 0.25) !important;
 }
 
 .cierre-card-obs span {

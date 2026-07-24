@@ -89,6 +89,7 @@ const setup = async () => {
       );
     `);
     await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🏷️'");
+    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS orden INT DEFAULT 0");
 
     const resCat = await pool.query('SELECT COUNT(*) FROM categorias');
     if (parseInt(resCat.rows[0].count) === 0) {
@@ -272,6 +273,15 @@ const setup = async () => {
       );
     `);
     console.log('✅ Tabla cierres_caja asegurada.');
+
+    console.log('Creando tabla de configuracion si no existe...');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS configuracion (
+        clave VARCHAR(100) PRIMARY KEY,
+        valor TEXT NOT NULL
+      );
+    `);
+    console.log('✅ Tabla configuracion asegurada.');
   } catch (err) {
     console.error('❌ Error configurando la base de datos:', err);
   } finally {
