@@ -591,12 +591,15 @@ body.dark-theme .form-select option {
 
 .products-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
+  align-content: start;
   gap: 0.85rem;
-  margin-top: 1rem;
+  margin-top: 0.5rem;
   flex: 1;
   overflow-y: auto;
+  padding-top: 0.5rem;
   padding-right: 0.5rem;
+  padding-left: 0.25rem;
   padding-bottom: 1rem;
 }
 
@@ -735,6 +738,83 @@ body.dark-theme .form-select option {
   transform: scale(1.1) !important;
 }
 
+/* Card de Paginación (Cuadro 16) */
+.product-card.pagination-card {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.15) 0%, rgba(239, 68, 68, 0.22) 100%);
+  border: 1px dashed var(--accent-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.15);
+  user-select: none;
+  padding: 0.85rem 0.5rem;
+}
+
+.product-card.pagination-card:hover {
+  transform: translateY(-4px) scale(1.03);
+  border-style: solid;
+  border-color: var(--accent-primary);
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.28) 0%, rgba(239, 68, 68, 0.35) 100%);
+  box-shadow: 0 6px 20px var(--accent-glow);
+}
+
+.pagination-icon {
+  font-size: 2.4rem;
+  margin-bottom: 0.4rem;
+  transition: transform 0.3s ease;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+}
+
+.product-card.pagination-card.next-page:hover .pagination-icon {
+  transform: translateX(6px) scale(1.1);
+}
+
+.product-card.pagination-card.prev-page:hover .pagination-icon {
+  transform: translateX(-6px) scale(1.1);
+}
+
+.pagination-text {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.pagination-split-buttons {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+  justify-content: center;
+}
+
+.btn-page-split {
+  flex: 1;
+  padding: 0.45rem 0.2rem;
+  border-radius: 10px;
+  border: 1px solid var(--accent-primary);
+  background: rgba(0, 0, 0, 0.3);
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-page-split:hover {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  transform: scale(1.08);
+}
+
 .btn-retry {
   background: rgba(244, 63, 94, 0.2);
   border: 1px solid rgba(244, 63, 94, 0.3);
@@ -744,6 +824,21 @@ body.dark-theme .form-select option {
   cursor: pointer;
   font-size: 0.8rem;
   margin-left: 1rem;
+}
+
+/* Modal de Opciones de Promoción (Lista y Cuadrícula) */
+.promo-grid-option-card:hover {
+  transform: translateY(-3px) scale(1.03);
+  border-color: var(--accent-primary) !important;
+  background: linear-gradient(135deg, rgba(234, 88, 12, 0.18) 0%, rgba(234, 88, 12, 0.06) 100%) !important;
+  box-shadow: 0 8px 20px rgba(234, 88, 12, 0.3) !important;
+}
+
+.btn-select-option-list:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-primary) !important;
+  background: rgba(234, 88, 12, 0.15) !important;
+  box-shadow: 0 4px 15px rgba(234, 88, 12, 0.25) !important;
 }
 
 /* Order Section & Ticket */

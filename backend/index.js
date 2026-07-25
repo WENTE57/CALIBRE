@@ -1098,17 +1098,36 @@ app.post('/api/pedidos', async (req, res) => {
 
     // 2. Insertar cada producto y descontar ingredientes del inventario
     for (const item of productos) {
+      // Validar si el ID es numérico (entero válido) o si proviene de una promoción (ej: 'promo-1-1784864199234')
+      const rawId = item.id;
+      const isIntegerId = (typeof rawId === 'number' && Number.isInteger(rawId)) ||
+                        (typeof rawId === 'string' && /^\d+$/.test(rawId));
+      const validProductId = isIntegerId ? parseInt(rawId, 10) : null;
+
       // Registrar el producto en el detalle del pedido
       await client.query(
         'INSERT INTO pedido_productos (pedido_id, producto_id, nombre_producto, cantidad, precio_unitario) VALUES ($1, $2, $3, $4, $5)',
-        [pedidoId, item.id || null, item.nombre, item.cantidad, item.precio]
+        [pedidoId, validProductId, item.nombre, item.cantidad, item.precio]
       );
 
       // Descontar stock si el producto es una promoción (productos fijos u opciones elegidas) o producto normal
-      if (item.opciones_elegidas || item.productos_fijos) {
+      const isPromo = item.promocion_id || (typeof rawId === 'string' && rawId.startsWith('promo-'));
+
+      if (isPromo) {
         // 1. Descontar ingredientes de Productos Fijos de la promoción
-        if (item.productos_fijos && Array.isArray(item.productos_fijos)) {
-          for (const prodFijo of item.productos_fijos) {
+        let fijos = item.productos_fijos;
+        if (!fijos || !Array.isArray(fijos) || fijos.length === 0) {
+          if (item.promocion_id) {
+            const fijosRes = await client.query(
+              'SELECT producto_id, cantidad FROM promocion_productos_fijos WHERE promocion_id = $1',
+              [item.promocion_id]
+            );
+            fijos = fijosRes.rows;
+          }
+        }
+
+        if (fijos && Array.isArray(fijos)) {
+          for (const prodFijo of fijos) {
             if (prodFijo.producto_id) {
               const recipeRes = await client.query(
                 'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
@@ -1143,11 +1162,11 @@ app.post('/api/pedidos', async (req, res) => {
             }
           }
         }
-      } else if (item.id) {
+      } else if (validProductId) {
         // Es un producto normal, descontar ingredientes del producto base
         const recipeRes = await client.query(
           'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
-          [item.id]
+          [validProductId]
         );
         for (const recipeItem of recipeRes.rows) {
           const discountAmount = parseFloat(recipeItem.cantidad) * item.cantidad;

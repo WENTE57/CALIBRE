@@ -1,6 +1,125 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import logoImg from './assets/logo.png';
+
+// Componente de Selección de Productos con Buscador por Teclado Integrado
+const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- Buscar o seleccionar producto --", style, id }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedOpt = options.find(o => String(o.value) === String(value));
+
+  const filteredOptions = options.filter(o => 
+    o.label.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative', width: '100%', ...style }} id={id}>
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          display: 'flex',
+          justify: 'space-between',
+          alignItems: 'center',
+          height: '38px',
+          padding: '0 0.75rem',
+          borderRadius: '8px',
+          background: 'var(--input-bg)',
+          border: isOpen ? '1.5px solid var(--accent-primary)' : '1px solid var(--glass-border)',
+          color: selectedOpt ? 'var(--text-primary)' : 'var(--text-muted)',
+          fontSize: '0.85rem',
+          cursor: 'pointer',
+          userSelect: 'none'
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {selectedOpt ? selectedOpt.label : placeholder}
+        </span>
+        <span style={{ fontSize: '0.75rem', opacity: 0.7, marginLeft: '0.5rem' }}>▼</span>
+      </div>
+
+      {isOpen && (
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          marginTop: '4px',
+          background: 'var(--card-bg, #1a0f08)',
+          border: '1px solid var(--accent-primary)',
+          borderRadius: '10px',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
+          zIndex: 99999,
+          overflow: 'hidden',
+          padding: '0.4rem'
+        }}>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="🔍 Escribe para buscar..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            autoFocus
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              height: '34px',
+              fontSize: '0.82rem',
+              marginBottom: '0.4rem',
+              background: 'rgba(255, 255, 255, 0.08)'
+            }}
+          />
+          <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+            {filteredOptions.length === 0 ? (
+              <div style={{ padding: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+                No hay coincidencias
+              </div>
+            ) : (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.value}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChange(opt.value);
+                    setIsOpen(false);
+                    setSearch('');
+                  }}
+                  style={{
+                    padding: '0.45rem 0.65rem',
+                    fontSize: '0.82rem',
+                    color: String(opt.value) === String(value) ? 'var(--accent-primary)' : 'var(--text-primary)',
+                    fontWeight: String(opt.value) === String(value) ? 'bold' : 'normal',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: String(opt.value) === String(value) ? 'rgba(234, 88, 12, 0.15)' : 'transparent',
+                    display: 'flex',
+                    justify: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(234, 88, 12, 0.15)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = String(opt.value) === String(value) ? 'rgba(234, 88, 12, 0.15)' : 'transparent'}
+                >
+                  <span>{opt.label}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 function App() {
   const [isDark, setIsDark] = useState(() => localStorage.getItem('calibre_theme') === 'dark');
@@ -167,6 +286,7 @@ function App() {
 
   // Filtro de categorías en Catálogo POS
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('Todos');
+  const [paginaProductos, setPaginaProductos] = useState(1);
 
   // Estados para creación dinámica de categorías
   const [listaCategorias, setListaCategorias] = useState([]);
@@ -213,6 +333,14 @@ function App() {
   const [promoSuccess, setPromoSuccess] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
   const [promocionesView, setPromocionesView] = useState('list'); // 'list', 'create', 'edit'
+  const [formatoPromoMode, setFormatoPromoMode] = useState('categoria'); // 'categoria', 'pack', 'combo'
+  const [packProductoId, setPackProductoId] = useState('');
+  const [packCantidad, setPackCantidad] = useState(2);
+  const [catComboNombre, setCatComboNombre] = useState('');
+  const [catComboCategoria, setCatComboCategoria] = useState('');
+  const [catComboCantidad, setCatComboCantidad] = useState(2);
+  const [catComboPrecioBase, setCatComboPrecioBase] = useState('');
+  const [catComboEmoji, setCatComboEmoji] = useState('🍔');
 
   // Selección de promociones en el POS
   const [showPromoSelectorModal, setShowPromoSelectorModal] = useState(false);
@@ -345,13 +473,10 @@ function App() {
 
   const seleccionarPromocion = (promo) => {
     if (!promo.pasos || promo.pasos.length === 0) {
-      const fijosStr = promo.productos_fijos && promo.productos_fijos.length > 0
-        ? ` (${promo.productos_fijos.map(pf => `${pf.cantidad}x ${pf.nombre_producto}`).join(', ')})`
-        : '';
       const itemPromo = {
         id: `promo-${promo.id}-${Date.now()}`,
         promocion_id: promo.id,
-        nombre: `${promo.nombre}${fijosStr}`,
+        nombre: promo.nombre,
         precio: parseFloat(promo.precio),
         cantidad: 1,
         imagen: promo.emoji || '🎁',
@@ -370,11 +495,37 @@ function App() {
 
   const seleccionarOpcionPaso = (opcion) => {
     const paso = selectedPromo.pasos[currentPromoStepIndex];
+    
+    // Calcular el extraVal en tiempo real contra la moda de precios del paso
+    const prodRef = productos.find(p => p.id === opcion.producto_id);
+    let extraVal = parseFloat(opcion.precio_adicional) || 0;
+    
+    const preciosOpciones = paso.opciones.map(o => {
+      const p = productos.find(pr => pr.id === o.producto_id);
+      return p ? parseFloat(p.precio) || 0 : (parseFloat(o.precio_producto) || 0);
+    }).filter(p => p > 0);
+
+    if (prodRef && preciosOpciones.length > 0) {
+      const frecs = {};
+      let maxF = 0;
+      let refP = preciosOpciones[0];
+      preciosOpciones.forEach(p => {
+        frecs[p] = (frecs[p] || 0) + 1;
+        if (frecs[p] > maxF) {
+          maxF = frecs[p];
+          refP = p;
+        }
+      });
+      const multiplier = (selectedPromo.pasos && selectedPromo.pasos.length) || 2;
+      const singleDiff = (parseFloat(prodRef.precio) || 0) - refP;
+      extraVal = singleDiff * multiplier;
+    }
+
     const choice = {
       paso_id: paso.id,
       producto_id: opcion.producto_id,
       nombre_producto: opcion.nombre_producto,
-      precio_adicional: parseFloat(opcion.precio_adicional) || 0.00
+      precio_adicional: extraVal
     };
 
     const nuevasOpciones = [...chosenPromoOpciones, choice];
@@ -383,16 +534,13 @@ function App() {
     if (currentPromoStepIndex < selectedPromo.pasos.length - 1) {
       setCurrentPromoStepIndex(currentPromoStepIndex + 1);
     } else {
-      const totalExtra = nuevasOpciones.reduce((sum, opt) => sum + opt.precio_adicional, 0);
-      const finalPrice = parseFloat(selectedPromo.precio) + totalExtra;
-      
-      const opcionesStr = nuevasOpciones.map(opt => opt.nombre_producto).join(', ');
-      const finalName = `${selectedPromo.nombre} (${opcionesStr})`;
+      const maxExtra = Math.max(...nuevasOpciones.map(opt => parseFloat(opt.precio_adicional) || 0));
+      const finalPrice = parseFloat(selectedPromo.precio) + maxExtra;
       
       const itemPromo = {
         id: `promo-${selectedPromo.id}-${Date.now()}`,
         promocion_id: selectedPromo.id,
-        nombre: finalName,
+        nombre: selectedPromo.nombre,
         precio: finalPrice,
         cantidad: 1,
         imagen: selectedPromo.emoji || '🎁',
@@ -514,22 +662,98 @@ function App() {
       return;
     }
 
-    if (promoPasos.length === 0 && promoProductosFijos.length === 0) {
-      setPromoError('Una promoción debe incluir al menos un producto fijo o un paso de selección.');
-      setPromoSuccess('');
-      return;
-    }
+    let finalFijos = [...promoProductosFijos];
+    let finalPasos = [...promoPasos];
 
-    for (const paso of promoPasos) {
-      if (!paso.nombre_paso.trim()) {
-        setPromoError('Todos los pasos deben tener un nombre.');
+    if (formatoPromoMode === 'categoria') {
+      if (!catComboCategoria || !promoPrecio.toString().trim()) {
+        setPromoError('Por favor selecciona la categoría permitida y asigna el precio base de la oferta.');
         setPromoSuccess('');
         return;
       }
-      if (paso.opciones.length === 0) {
-        setPromoError(`El paso "${paso.nombre_paso}" debe tener al menos una opción.`);
+
+      const prodsCat = productos.filter(p => p.categoria === catComboCategoria);
+      if (prodsCat.length === 0) {
+        setPromoError(`La categoría "${catComboCategoria}" no contiene productos registrados.`);
         setPromoSuccess('');
         return;
+      }
+
+      // Encontrar la MODA de los precios (el precio que más se repite en la categoría)
+      const preciosArr = prodsCat.map(p => parseFloat(p.precio) || 0).filter(p => p > 0);
+      const frecuencias = {};
+      let maxFrecuencia = 0;
+      let precioModa = preciosArr[0] || 0;
+
+      preciosArr.forEach(precio => {
+        frecuencias[precio] = (frecuencias[precio] || 0) + 1;
+        if (frecuencias[precio] > maxFrecuencia) {
+          maxFrecuencia = frecuencias[precio];
+          precioModa = precio;
+        }
+      });
+
+      const cant = parseInt(catComboCantidad) || 2;
+      const pasosAuto = [];
+
+      for (let i = 1; i <= cant; i++) {
+        const opciones = prodsCat.map(p => {
+          const pPrecio = parseFloat(p.precio) || 0;
+          const extra = Math.max(0, pPrecio - precioModa);
+          return {
+            producto_id: p.id,
+            nombre_producto: p.nombre,
+            precio_producto: p.precio,
+            precio_adicional: extra
+          };
+        });
+
+        pasosAuto.push({
+          nombre_paso: `Elige ${catComboCategoria} #${i}`,
+          obligatorio: true,
+          opciones: opciones
+        });
+      }
+
+      finalFijos = [];
+      finalPasos = pasosAuto;
+    } else if (formatoPromoMode === 'pack') {
+      finalPasos = [];
+      if (finalFijos.length === 0 && packProductoId) {
+        const prod = productos.find(p => p.id === parseInt(packProductoId));
+        if (prod) {
+          finalFijos = [{
+            producto_id: prod.id,
+            nombre_producto: prod.nombre,
+            precio_producto: prod.precio,
+            cantidad: parseInt(packCantidad) || 1
+          }];
+        }
+      }
+
+      if (finalFijos.length === 0) {
+        setPromoError('Por favor selecciona un producto base para crear el pack u oferta.');
+        setPromoSuccess('');
+        return;
+      }
+    } else {
+      if (finalPasos.length === 0 && finalFijos.length === 0) {
+        setPromoError('Una promoción tipo combo debe incluir al menos un producto fijo o un paso de selección.');
+        setPromoSuccess('');
+        return;
+      }
+
+      for (const paso of finalPasos) {
+        if (!paso.nombre_paso.trim()) {
+          setPromoError('Todos los pasos deben tener un nombre.');
+          setPromoSuccess('');
+          return;
+        }
+        if (paso.opciones.length === 0) {
+          setPromoError(`El paso "${paso.nombre_paso}" debe tener al menos una opción.`);
+          setPromoSuccess('');
+          return;
+        }
       }
     }
 
@@ -552,8 +776,8 @@ function App() {
           nombre: promoNombre.trim(),
           precio: parseFloat(promoPrecio),
           activo: promoActivo,
-          productos_fijos: promoProductosFijos,
-          pasos: promoPasos,
+          productos_fijos: finalFijos,
+          pasos: finalPasos,
           emoji: promoEmoji
         })
       });
@@ -566,6 +790,8 @@ function App() {
         setPromoActivo(true);
         setPromoProductosFijos([]);
         setPromoPasos([]);
+        setPackProductoId('');
+        setPackCantidad(2);
         setEditandoPromoId(null);
         setPromocionesView('list');
         cargarPromociones();
@@ -591,6 +817,17 @@ function App() {
       ...paso,
       temp_id: paso.id || (Date.now() + Math.random())
     })));
+
+    if (promo.pasos && promo.pasos.length > 0) {
+      setFormatoPromoMode('combo');
+    } else {
+      setFormatoPromoMode('pack');
+      if (promo.productos_fijos && promo.productos_fijos.length > 0) {
+        setPackProductoId(promo.productos_fijos[0].producto_id);
+        setPackCantidad(promo.productos_fijos[0].cantidad);
+      }
+    }
+
     setPromoError('');
     setPromoSuccess('');
     setPromocionesView('edit');
@@ -1583,6 +1820,7 @@ function App() {
         cantidad: item.cantidad,
         precio: parseFloat(item.precio),
         promocion_id: item.promocion_id || null,
+        productos_fijos: item.productos_fijos || [],
         opciones_elegidas: item.opciones_elegidas || []
       })),
       nota: pedidoNota.trim() || null,
@@ -1959,14 +2197,14 @@ function App() {
                     <div className="category-sidebar">
                       {/* Categorías Estáticas (No arrastrables) */}
                       <button
-                        onClick={() => setCategoriaSeleccionada('Todos')}
+                        onClick={() => { setCategoriaSeleccionada('Todos'); setPaginaProductos(1); }}
                         className={`category-sidebar-btn ${categoriaSeleccionada === 'Todos' ? 'active' : ''}`}
                       >
                         <span className="category-btn-icon">🍽️</span>
                         <span className="category-btn-text" title="Todos">Todos</span>
                       </button>
                       <button
-                        onClick={() => setCategoriaSeleccionada('Promociones')}
+                        onClick={() => { setCategoriaSeleccionada('Promociones'); setPaginaProductos(1); }}
                         className={`category-sidebar-btn ${categoriaSeleccionada === 'Promociones' ? 'active' : ''}`}
                       >
                         <span className="category-btn-icon">🎁</span>
@@ -1986,10 +2224,11 @@ function App() {
                             onDragStart={(e) => handleCatDragStart(e, idx)}
                             onDragOver={(e) => handleCatDragOver(e, idx)}
                             onDragEnd={handleCatDragEnd}
-                            onClick={() => setCategoriaSeleccionada(nombre)}
+                            onClick={() => { setCategoriaSeleccionada(nombre); setPaginaProductos(1); }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
                                 setCategoriaSeleccionada(nombre);
+                                setPaginaProductos(1);
                               }
                             }}
                             role="button"
@@ -2010,41 +2249,99 @@ function App() {
                     {/* Contenedor de Productos (Derecha) */}
                     <div className="products-container">
                       <div className="products-grid">
-                        {categoriaSeleccionada === 'Promociones' ? (
-                          promociones
-                            .filter(promo => promo.activo !== false)
-                            .map((promo) => (
-                              <div key={`promo-${promo.id}`} className="product-card promotion-card" onClick={() => seleccionarPromocion(promo)} style={{ border: '1px dashed var(--accent-primary)', position: 'relative' }}>
-                                <div className="product-emoji" style={{ color: 'var(--accent-primary)' }}>{promo.emoji || '🎁'}</div>
-                                <div className="product-info">
-                                  <h4 className="product-name" style={{ color: 'var(--accent-primary)', fontWeight: 'bold' }}>{promo.nombre}</h4>
-                                  <span className="product-price">
-                                     ${parseFloat(promo.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                                  </span>
-                                </div>
-                                <button className="btn-add" style={{ background: 'var(--accent-primary)' }}>
-                                  <span>+</span>
-                                </button>
-                              </div>
-                            ))
-                        ) : (
-                          productos
-                            .filter((prod) => (categoriaSeleccionada === 'Todos' && prod.categoria !== 'Promociones') || prod.categoria === categoriaSeleccionada)
-                            .map((prod) => (
-                              <div key={prod.id} className="product-card" onClick={() => agregarAlPedido(prod)}>
-                                <div className="product-emoji">{prod.imagen || '🍔'}</div>
-                                <div className="product-info">
-                                  <h4 className="product-name">{prod.nombre}</h4>
-                                  <span className="product-price">
-                                     ${parseFloat(prod.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                                  </span>
-                                </div>
-                                <button className="btn-add">
-                                  <span>+</span>
-                                </button>
-                              </div>
-                            ))
-                        )}
+                        {(() => {
+                          const itemsFiltrados = categoriaSeleccionada === 'Promociones'
+                            ? promociones.filter(promo => promo.activo !== false)
+                            : productos.filter((prod) => (categoriaSeleccionada === 'Todos' && prod.categoria !== 'Promociones') || prod.categoria === categoriaSeleccionada);
+
+                          const ITEMS_POR_PAGINA = 15;
+                          const totalPaginas = Math.ceil(itemsFiltrados.length / ITEMS_POR_PAGINA) || 1;
+                          const paginaActual = Math.min(paginaProductos, totalPaginas);
+                          const startIndex = (paginaActual - 1) * ITEMS_POR_PAGINA;
+                          const itemsPagina = itemsFiltrados.slice(startIndex, startIndex + ITEMS_POR_PAGINA);
+                          const requierePaginacion = itemsFiltrados.length > ITEMS_POR_PAGINA;
+
+                          return (
+                            <>
+                              {itemsPagina.map((item) => {
+                                if (categoriaSeleccionada === 'Promociones') {
+                                  return (
+                                    <div key={`promo-${item.id}`} className="product-card promotion-card" onClick={() => seleccionarPromocion(item)} style={{ border: '1px dashed var(--accent-primary)', position: 'relative' }}>
+                                      <div className="product-emoji" style={{ color: 'var(--accent-primary)' }}>{item.emoji || '🎁'}</div>
+                                      <div className="product-info">
+                                        <h4 className="product-name" style={{ color: 'var(--accent-primary)', fontWeight: 'bold' }}>{item.nombre}</h4>
+                                        <span className="product-price">
+                                           ${parseFloat(item.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                        </span>
+                                      </div>
+                                      <button className="btn-add" style={{ background: 'var(--accent-primary)' }}>
+                                        <span>+</span>
+                                      </button>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div key={item.id} className="product-card" onClick={() => agregarAlPedido(item)}>
+                                    <div className="product-emoji">{item.imagen || '🍔'}</div>
+                                    <div className="product-info">
+                                      <h4 className="product-name">{item.nombre}</h4>
+                                      <span className="product-price">
+                                         ${parseFloat(item.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                      </span>
+                                    </div>
+                                    <button className="btn-add">
+                                      <span>+</span>
+                                    </button>
+                                  </div>
+                                );
+                              })}
+
+                              {/* Cuadro 16: Card de Paginación con solo la Flecha y Pág. X de Y */}
+                              {requierePaginacion && (
+                                paginaActual === 1 ? (
+                                  <div 
+                                    className="product-card pagination-card next-page" 
+                                    onClick={() => setPaginaProductos(2)}
+                                    title="Página siguiente"
+                                  >
+                                    <div className="pagination-icon">➡️</div>
+                                    <span className="pagination-text">Pág. 1 de {totalPaginas}</span>
+                                  </div>
+                                ) : paginaActual < totalPaginas ? (
+                                  <div className="product-card pagination-card multi-page">
+                                    <div className="pagination-split-buttons">
+                                      <button 
+                                        className="btn-page-split prev" 
+                                        onClick={(e) => { e.stopPropagation(); setPaginaProductos(p => p - 1); }}
+                                        title="Página anterior"
+                                      >
+                                        ⬅️
+                                      </button>
+                                      <button 
+                                        className="btn-page-split next" 
+                                        onClick={(e) => { e.stopPropagation(); setPaginaProductos(p => p + 1); }}
+                                        title="Página siguiente"
+                                      >
+                                        ➡️
+                                      </button>
+                                    </div>
+                                    <span className="pagination-text" style={{ marginTop: '0.4rem' }}>Pág. {paginaActual} de {totalPaginas}</span>
+                                  </div>
+                                ) : (
+                                  <div 
+                                    className="product-card pagination-card prev-page" 
+                                    onClick={() => setPaginaProductos(p => p - 1)}
+                                    title="Página anterior"
+                                  >
+                                    <div className="pagination-icon">⬅️</div>
+                                    <span className="pagination-text">Pág. {paginaActual} de {totalPaginas}</span>
+                                  </div>
+                                )
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -2069,6 +2366,35 @@ function App() {
                               <span className="item-emoji">{item.imagen || '🍔'}</span>
                               <div className="item-details">
                                 <span className="item-name">{item.nombre}</span>
+                                {item.opciones_elegidas && item.opciones_elegidas.length > 0 && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.2rem' }}>
+                                    {(() => {
+                                      const agrupados = item.opciones_elegidas.reduce((acc, opt) => {
+                                        const nombre = opt.nombre_producto;
+                                        if (!acc[nombre]) {
+                                          acc[nombre] = { nombre_producto: nombre, cantidad: 0 };
+                                        }
+                                        acc[nombre].cantidad += 1;
+                                        return acc;
+                                      }, {});
+
+                                      return Object.values(agrupados).map((optGroup, oIdx) => (
+                                        <span key={oIdx} style={{ fontSize: '0.82rem', color: '#10b981', fontWeight: '600', lineHeight: 1.3 }}>
+                                          {optGroup.cantidad > 1 ? `${optGroup.cantidad}x ` : ''}{optGroup.nombre_producto}
+                                        </span>
+                                      ));
+                                    })()}
+                                  </div>
+                                )}
+                                {item.productos_fijos && item.productos_fijos.length > 0 && (!item.opciones_elegidas || item.opciones_elegidas.length === 0) && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.2rem' }}>
+                                    {item.productos_fijos.map((pf, fIdx) => (
+                                      <span key={fIdx} style={{ fontSize: '0.82rem', color: '#10b981', fontWeight: '600', lineHeight: 1.3 }}>
+                                        {pf.cantidad}x {pf.nombre_producto}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                                 <span className="item-price">
                                   ${(parseFloat(item.precio) * item.cantidad).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
                                 </span>
@@ -3146,6 +3472,7 @@ function App() {
                             setPromoNombre('');
                             setPromoPrecio('');
                             setPromoEmoji('🎁');
+                            setPromoProductosFijos([]);
                             setPromoPasos([]);
                             setEditandoPromoId(null);
                             setPromoError('');
@@ -3164,56 +3491,504 @@ function App() {
                         </div>
                       )}
 
+                      {/* Selector de Formato de Promoción / Oferta */}
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', background: 'rgba(255,255,255,0.03)', padding: '0.4rem', borderRadius: '12px', border: '1px solid var(--glass-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormatoPromoMode('categoria');
+                            if (!promoNombre) setPromoNombre('2x Churrascos a Elección');
+                            if (!promoPrecio) setPromoPrecio('6900');
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '0.6rem 0.5rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            fontWeight: '700',
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
+                            background: formatoPromoMode === 'categoria' ? 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' : 'transparent',
+                            color: formatoPromoMode === 'categoria' ? 'white' : 'var(--text-secondary)',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.2rem',
+                            boxShadow: formatoPromoMode === 'categoria' ? '0 4px 12px rgba(124, 58, 237, 0.3)' : 'none'
+                          }}
+                        >
+                          <span style={{ fontSize: '0.9rem' }}>🏷️ Combo por Categoría</span>
+                          <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>(Ej: 2 Churrascos a Elección)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setFormatoPromoMode('pack')}
+                          style={{
+                            flex: 1,
+                            padding: '0.6rem 0.5rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            fontWeight: '700',
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
+                            background: formatoPromoMode === 'pack' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'transparent',
+                            color: formatoPromoMode === 'pack' ? 'white' : 'var(--text-secondary)',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.2rem',
+                            boxShadow: formatoPromoMode === 'pack' ? '0 4px 12px rgba(16, 185, 129, 0.3)' : 'none'
+                          }}
+                        >
+                          <span style={{ fontSize: '0.9rem' }}>📦 Pack Rápido Fijo</span>
+                          <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>(Ej: 2 Churrascos Fijos)</span>
+                        </button>
+                        
+                        <button
+                          type="button"
+                          onClick={() => setFormatoPromoMode('combo')}
+                          style={{
+                            flex: 1,
+                            padding: '0.6rem 0.5rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            fontWeight: '700',
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
+                            background: formatoPromoMode === 'combo' ? 'linear-gradient(135deg, var(--accent-primary) 0%, #ef4444 100%)' : 'transparent',
+                            color: formatoPromoMode === 'combo' ? 'white' : 'var(--text-secondary)',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.2rem',
+                            boxShadow: formatoPromoMode === 'combo' ? '0 4px 12px var(--accent-glow)' : 'none'
+                          }}
+                        >
+                          <span style={{ fontSize: '0.9rem' }}>🎁 Combo Personalizado</span>
+                          <span style={{ fontSize: '0.7rem', opacity: 0.85 }}>(Pasos Libres)</span>
+                        </button>
+                      </div>
+
                       <form onSubmit={handleSavePromo} className="admin-form" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
-                        <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
-                          <div className="form-group">
-                            <label className="form-label">Nombre de la Promoción</label>
-                            <input
-                              type="text"
-                              className="form-input"
-                              placeholder="Ej. Promo Completo + Bebida"
-                              value={promoNombre}
-                              onChange={(e) => setPromoNombre(e.target.value)}
-                            />
+                        
+                        {formatoPromoMode === 'categoria' ? (
+                          /* MODO COMBO POR CATEGORÍA (Ej: 2 Churrascos a Elección con ajuste automático por más caro) */
+                          <div style={{ background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.08) 0%, rgba(109, 40, 217, 0.03) 100%)', padding: '1.25rem', borderRadius: '14px', border: '1px solid rgba(124, 58, 237, 0.3)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <h4 style={{ margin: 0, fontSize: '1rem', color: '#a78bfa', fontWeight: 'bold' }}>🏷️ Creador de Combo por Categoría</h4>
+                                <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Permite combinar productos de una misma categoría. Si se elige un producto de mayor precio (ej. Chacarero), calcula automáticamente la diferencia.</p>
+                              </div>
+                              <span style={{ background: 'rgba(124, 58, 237, 0.25)', color: '#c4b5fd', padding: '0.25rem 0.65rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 'bold', border: '1px solid rgba(124, 58, 237, 0.4)' }}>
+                                ⚡ Autocalcula Extras
+                              </span>
+                            </div>
+
+                            <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
+                              <div className="form-group">
+                                <label className="form-label">Categoría Permitida</label>
+                                <select
+                                  className="form-input form-select"
+                                  value={catComboCategoria}
+                                  onChange={(e) => {
+                                    const cat = e.target.value;
+                                    setCatComboCategoria(cat);
+                                    if (!catComboNombre || catComboNombre.includes('a Elección')) {
+                                      setCatComboNombre(`2x ${cat} a Elección`);
+                                    }
+                                  }}
+                                >
+                                  <option value="" disabled>-- Seleccionar Categoría (Ej: Churrasco) --</option>
+                                  {listaCategorias.map(c => (
+                                    <option key={c.id} value={c.nombre}>{c.emoji || '📁'} {c.nombre}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="form-group">
+                                <label className="form-label">Cantidad a Elección</label>
+                                <input
+                                  type="number"
+                                  min="2"
+                                  className="form-input"
+                                  placeholder="Ej: 2"
+                                  value={catComboCantidad}
+                                  onChange={(e) => {
+                                    const cant = parseInt(e.target.value) || 2;
+                                    setCatComboCantidad(cant);
+                                    if (catComboCategoria && (!catComboNombre || catComboNombre.includes('a Elección'))) {
+                                      setCatComboNombre(`${cant}x ${catComboCategoria} a Elección`);
+                                    }
+                                  }}
+                                />
+                              </div>
+
+                              <div className="form-group">
+                                <label className="form-label">Precio Base Oferta ($)</label>
+                                <input
+                                  type="number"
+                                  className="form-input"
+                                  placeholder="Ej: 6900"
+                                  value={promoPrecio}
+                                  onChange={(e) => setPromoPrecio(e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+                              <div className="form-group">
+                                <label className="form-label">Nombre de la Promoción</label>
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  placeholder="Ej. 2 Churrascos a Elección"
+                                  value={promoNombre}
+                                  onChange={(e) => setPromoNombre(e.target.value)}
+                                />
+                              </div>
+
+                              <div className="form-group">
+                                <label className="form-label">Emoji Representativo</label>
+                                <select
+                                  className="form-input form-select"
+                                  value={promoEmoji}
+                                  onChange={(e) => setPromoEmoji(e.target.value)}
+                                >
+                                  <option value="🍔">🍔 Hamburguesa / Churrasco</option>
+                                  <option value="🎁">🎁 Regalo / Combo</option>
+                                  <option value="🏷️">🏷️ Oferta</option>
+                                  <option value="🌭">🌭 Completo</option>
+                                  <option value="🍟">🍟 Papas Fritas</option>
+                                  <option value="🥤">🥤 Bebida</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div style={{ background: 'rgba(0,0,0,0.2)', padding: '0.75rem 1rem', borderRadius: '10px', fontSize: '0.8rem', color: 'var(--text-secondary)', border: '1px solid rgba(124, 58, 237, 0.2)' }}>
+                              💡 <strong>Ajuste de Precio Automático:</strong> El sistema importará todos los productos de la categoría seleccionada. Si el cliente elige un producto de mayor precio (ej. Chacarero $4.400 vs Italiano $4.100), el recargo de $300 se sumará automáticamente a los $6.900 base, quedando el total en <strong>$7.200</strong>.
+                            </div>
                           </div>
-                          <div className="form-group">
-                            <label className="form-label">Precio ($)</label>
-                            <input
-                              type="number"
-                              className="form-input"
-                              placeholder="3500"
-                              value={promoPrecio}
-                              onChange={(e) => setPromoPrecio(e.target.value)}
-                            />
+                        ) : formatoPromoMode === 'pack' ? (
+                          /* MODO PACK / OFERTA MULTI-UNIDAD (Ej: 2 Churrascos x $6.900) */
+                          <div style={{ background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.06) 0%, rgba(5, 150, 105, 0.03) 100%)', padding: '1.25rem', borderRadius: '14px', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <h4 style={{ margin: 0, fontSize: '1rem', color: '#10b981', fontWeight: 'bold' }}>📦 Creador de Pack u Oferta Multi-Unidad</h4>
+                                <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Crea ofertas directas de varios productos iguales o combinados (Ej: 2 Churrascos, 3 Bebidas, 2x1) sin configuración compleja.</p>
+                              </div>
+                              <span style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', padding: '0.25rem 0.65rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 'bold', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
+                                ⚡ Alta Rápida
+                              </span>
+                            </div>
+
+                            <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
+                              <div className="form-group">
+                                <label className="form-label">Producto Base para la Oferta</label>
+                                <SearchableProductSelect
+                                  placeholder="-- Buscar o Seleccionar Producto (Ej. Churrasco) --"
+                                  options={productos.map(p => ({
+                                    value: p.id,
+                                    label: `${p.nombre} ($${parseFloat(p.precio).toLocaleString('es-CL')})`
+                                  }))}
+                                  value={packProductoId}
+                                  onChange={(val) => {
+                                    setPackProductoId(val);
+                                    const prod = productos.find(p => p.id === parseInt(val));
+                                    if (prod) {
+                                      if (!promoNombre || promoNombre.startsWith(`${packCantidad}x `)) {
+                                        setPromoNombre(`${packCantidad}x ${prod.nombre}`);
+                                      }
+                                      if (prod.imagen) {
+                                        setPromoEmoji(prod.imagen);
+                                      }
+                                    }
+                                  }}
+                                />
+                              </div>
+
+                              <div className="form-group">
+                                <label className="form-label">Cantidad Unidades</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  className="form-input"
+                                  placeholder="Ej: 2"
+                                  value={packCantidad}
+                                  onChange={(e) => {
+                                    const cant = parseInt(e.target.value) || 1;
+                                    setPackCantidad(cant);
+                                    const prod = productos.find(p => p.id === parseInt(packProductoId));
+                                    if (prod && (!promoNombre || promoNombre.includes(prod.nombre))) {
+                                      setPromoNombre(`${cant}x ${prod.nombre}`);
+                                    }
+                                  }}
+                                />
+                              </div>
+
+                              <div className="form-group">
+                                <label className="form-label">Precio Oferta ($)</label>
+                                <input
+                                  type="number"
+                                  className="form-input"
+                                  placeholder="Ej: 6900"
+                                  value={promoPrecio}
+                                  onChange={(e) => setPromoPrecio(e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+                              <div className="form-group">
+                                <label className="form-label">Nombre de la Oferta / Pack</label>
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  placeholder="Ej. 2 Churrascos por $6.900"
+                                  value={promoNombre}
+                                  onChange={(e) => setPromoNombre(e.target.value)}
+                                />
+                              </div>
+
+                              <div className="form-group">
+                                <label className="form-label">Emoji Representativo</label>
+                                <select
+                                  className="form-input form-select"
+                                  value={promoEmoji}
+                                  onChange={(e) => setPromoEmoji(e.target.value)}
+                                >
+                                  <option value="🎁">🎁 Regalo / Combo</option>
+                                  <option value="📦">📦 Pack / Multi-Unidad</option>
+                                  <option value="🏷️">🏷️ Oferta</option>
+                                  <option value="🔥">🔥 Destacado</option>
+                                  <option value="🍔">🍔 Hamburguesa</option>
+                                  <option value="🌭">🌭 Completo</option>
+                                  <option value="🍟">🍟 Papas Fritas</option>
+                                  <option value="🥤">🥤 Bebida</option>
+                                  <option value="🍕">🍕 Pizza</option>
+                                  <option value="🍗">🍗 Pollo Frito</option>
+                                  <option value="🥪">🥪 Sándwich</option>
+                                  <option value="🍻">🍻 Cervezas</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Mostrar productos adicionales o listado fijo */}
+                            <div style={{ borderTop: '1px dashed rgba(16, 185, 129, 0.25)', paddingTop: '0.85rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#10b981' }}>Contenido Incluido en este Pack:</span>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Descuento automático de stock de insumos</span>
+                              </div>
+
+                              {promoProductosFijos.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                                  {promoProductosFijos.map((pf) => (
+                                    <div key={pf.producto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.3rem 0.6rem', borderRadius: '8px', fontSize: '0.8rem', border: '1px solid rgba(16,185,129,0.3)' }}>
+                                      <span style={{ fontWeight: 'bold', color: '#10b981' }}>{pf.cantidad}x</span>
+                                      <span>{pf.nombre_producto}</span>
+                                      <button type="button" onClick={() => eliminarProductoFijoPromoForm(pf.producto_id)} style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}>&times;</button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px auto', gap: '0.5rem', alignItems: 'center' }}>
+                                <SearchableProductSelect
+                                  placeholder="-- Buscar producto secundario --"
+                                  options={productos.map(p => ({
+                                    value: p.id,
+                                    label: `${p.nombre} ($${parseFloat(p.precio).toLocaleString('es-CL')})`
+                                  }))}
+                                  value={selectedFixedProdId}
+                                  onChange={(val) => setSelectedFixedProdId(val)}
+                                />
+                                <input type="number" className="form-input" placeholder="Cant" defaultValue="1" min="1" style={{ height: '38px', fontSize: '0.82rem', textAlign: 'center', width: '100%' }} id="cant-fixed-product" />
+                                <button type="button" className="btn-secondary" style={{ height: '38px', fontSize: '0.8rem', padding: '0 0.85rem', width: 'auto', whiteSpace: 'nowrap' }} onClick={() => {
+                                  const cant = document.getElementById('cant-fixed-product');
+                                  if (selectedFixedProdId) {
+                                    agregarProductoFijoPromoForm(selectedFixedProdId, cant ? cant.value || 1 : 1);
+                                    setSelectedFixedProdId('');
+                                    if (cant) cant.value = "1";
+                                  }
+                                }}>+ Agregar</button>
+                              </div>
+                            </div>
                           </div>
-                          <div className="form-group">
-                            <label className="form-label">Emoji</label>
-                            <select
-                              className="form-input form-select"
-                              value={promoEmoji}
-                              onChange={(e) => setPromoEmoji(e.target.value)}
-                            >
-                              <option value="🎁">🎁 Regalo / Combo</option>
-                              <option value="🛍️">🛍️ Bolsa Compra</option>
-                              <option value="🏷️">🏷️ Oferta</option>
-                              <option value="✨">✨ Especial</option>
-                              <option value="🔥">🔥 Destacado</option>
-                              <option value="🍔">🍔 Hamburguesa</option>
-                              <option value="🌭">🌭 Completo</option>
-                              <option value="🍟">🍟 Papas Fritas</option>
-                              <option value="🥤">🥤 Bebida</option>
-                              <option value="🍕">🍕 Pizza</option>
-                              <option value="🍗">🍗 Pollo Frito</option>
-                              <option value="🌮">🌮 Taco</option>
-                              <option value="🥪">🥪 Sándwich</option>
-                              <option value="🍩">🍩 Dona</option>
-                              <option value="🍦">🍦 Helado</option>
-                              <option value="🍰">🍰 Pastel</option>
-                              <option value="🍻">🍻 Cervezas</option>
-                              <option value="☕">☕ Café</option>
-                            </select>
-                          </div>
-                        </div>
+                        ) : (
+                          /* MODO COMBO PERSONALIZADO (Paso a Paso con Opciones) */
+                          <>
+                            <div className="form-row" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '1rem' }}>
+                              <div className="form-group">
+                                <label className="form-label">Nombre de la Promoción</label>
+                                <input
+                                  type="text"
+                                  className="form-input"
+                                  placeholder="Ej. Promo Completo + Bebida"
+                                  value={promoNombre}
+                                  onChange={(e) => setPromoNombre(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group">
+                                <label className="form-label">Precio ($)</label>
+                                <input
+                                  type="number"
+                                  className="form-input"
+                                  placeholder="3500"
+                                  value={promoPrecio}
+                                  onChange={(e) => setPromoPrecio(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group">
+                                <label className="form-label">Emoji</label>
+                                <select
+                                  className="form-input form-select"
+                                  value={promoEmoji}
+                                  onChange={(e) => setPromoEmoji(e.target.value)}
+                                >
+                                  <option value="🎁">🎁 Regalo / Combo</option>
+                                  <option value="🛍️">🛍️ Bolsa Compra</option>
+                                  <option value="🏷️">🏷️ Oferta</option>
+                                  <option value="✨">✨ Especial</option>
+                                  <option value="🔥">🔥 Destacado</option>
+                                  <option value="🍔">🍔 Hamburguesa</option>
+                                  <option value="🌭">🌭 Completo</option>
+                                  <option value="🍟">🍟 Papas Fritas</option>
+                                  <option value="🥤">🥤 Bebida</option>
+                                  <option value="🍕">🍕 Pizza</option>
+                                  <option value="🍗">🍗 Pollo Frito</option>
+                                  <option value="🌮">🌮 Taco</option>
+                                  <option value="🥪">🥪 Sándwich</option>
+                                  <option value="🍻">🍻 Cervezas</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Apartado Extra: Productos Fijos */}
+                            <div className="form-group" style={{ 
+                              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(5, 150, 105, 0.02) 100%)', 
+                              padding: '1.25rem', 
+                              borderRadius: '14px', 
+                              border: '1px solid rgba(16, 185, 129, 0.25)'
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem' }}>
+                                <div>
+                                  <label className="form-label" style={{ marginBottom: 0, fontWeight: '700', color: '#10b981' }}>📌 Productos Fijos Incluidos</label>
+                                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }}>Se agregan de forma fija a la comanda.</p>
+                                </div>
+                              </div>
+
+                              {promoProductosFijos.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '0.85rem' }}>
+                                  {promoProductosFijos.map((pf) => (
+                                    <div key={pf.producto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'var(--item-bg)', padding: '0.4rem 0.75rem', borderRadius: '10px', fontSize: '0.85rem', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                                      <span style={{ background: '#10b981', color: 'white', padding: '0.1rem 0.45rem', borderRadius: '6px', fontWeight: 'bold' }}>{pf.cantidad}x</span>
+                                      <span>{pf.nombre_producto}</span>
+                                      <button type="button" onClick={() => eliminarProductoFijoPromoForm(pf.producto_id)} style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}>&times;</button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                                <select className="form-input form-select" style={{ height: '38px', fontSize: '0.85rem', flex: 1 }} id="sel-fixed-product" defaultValue="">
+                                  <option value="" disabled>-- Seleccionar Producto Fijo --</option>
+                                  {productos.map(p => (
+                                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                                  ))}
+                                </select>
+                                <input type="number" className="form-input" placeholder="Cant" defaultValue="1" min="1" style={{ width: '65px', height: '38px', fontSize: '0.85rem', textAlign: 'center' }} id="cant-fixed-product" />
+                                <button type="button" className="btn-secondary" style={{ height: '38px', fontSize: '0.85rem' }} onClick={() => {
+                                  const sel = document.getElementById('sel-fixed-product');
+                                  const cant = document.getElementById('cant-fixed-product');
+                                  if (sel && sel.value) {
+                                    agregarProductoFijoPromoForm(sel.value, cant.value || 1);
+                                    sel.value = "";
+                                    cant.value = "1";
+                                  }
+                                }}>➕ Incluir</button>
+                              </div>
+                            </div>
+
+                            {/* Pasos de selección */}
+                            <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <label className="form-label" style={{ marginBottom: 0 }}>Pasos de Selección (Combo)</label>
+                                <button type="button" className="btn-secondary" onClick={agregarPasoPromoForm} style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}>
+                                  ➕ Agregar Paso
+                                </button>
+                              </div>
+
+                              {promoPasos.length === 0 ? (
+                                <p style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-secondary)', textAlign: 'center', padding: '1.5rem', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
+                                  Agrega al menos un paso para definir qué productos componen este combo.
+                                </p>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                  {promoPasos.map((paso, pIdx) => {
+                                    const idKey = paso.id || paso.temp_id;
+                                    const isReal = !!paso.id;
+                                    return (
+                                      <div key={idKey} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', padding: '1rem' }}>
+                                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                                          <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>#{pIdx + 1}</span>
+                                          <input type="text" className="form-input" placeholder="Ej. Elige tu Bebida" style={{ flex: 1, height: '32px', fontSize: '0.85rem' }} value={paso.nombre_paso} onChange={(e) => actualizarNombrePasoForm(idKey, isReal, e.target.value)} />
+                                          <button type="button" onClick={() => eliminarPasoPromoForm(idKey, isReal)} style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.3rem 0.5rem', borderRadius: '4px' }}>🗑️</button>
+                                        </div>
+
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                          <span style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Productos Opcionales en este Paso:</span>
+                                          {paso.opciones.length === 0 ? (
+                                            <p style={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>No hay opciones agregadas aún.</p>
+                                          ) : (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                              {paso.opciones.map(opc => (
+                                                <div key={opc.producto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}>
+                                                  <span>{opc.nombre_producto}</span>
+                                                  {parseFloat(opc.precio_adicional) > 0 && (
+                                                    <span style={{ color: 'var(--accent-primary)', fontSize: '0.75rem' }}>(+${parseFloat(opc.precio_adicional)})</span>
+                                                  )}
+                                                  <button type="button" onClick={() => eliminarOpcionDelPasoForm(idKey, isReal, opc.producto_id)} style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}>&times;</button>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 95px auto', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
+                                            <SearchableProductSelect
+                                              placeholder="-- Buscar o Seleccionar Producto --"
+                                              options={productos.map(p => ({
+                                                value: p.id,
+                                                label: `${p.nombre} ($${parseFloat(p.precio).toLocaleString('es-CL')})`
+                                              }))}
+                                              value={selectedStepProds[idKey] || ''}
+                                              onChange={(val) => setSelectedStepProds(prev => ({ ...prev, [idKey]: val }))}
+                                            />
+                                            <input type="number" className="form-input" placeholder="Extra $" style={{ height: '38px', fontSize: '0.85rem', textAlign: 'center', width: '100%' }} id={`extra-price-${idKey}`} />
+                                            <button type="button" className="btn-primary" style={{ height: '38px', padding: '0 1.1rem', fontSize: '0.85rem', width: 'auto', whiteSpace: 'nowrap' }} onClick={() => {
+                                              const val = selectedStepProds[idKey];
+                                              const extra = document.getElementById(`extra-price-${idKey}`);
+                                              if (val) {
+                                                agregarOpcionAlPasoForm(idKey, isReal, val, extra ? extra.value : 0);
+                                                setSelectedStepProds(prev => ({ ...prev, [idKey]: '' }));
+                                                if (extra) extra.value = "";
+                                              }
+                                            }}>+ Añadir</button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
 
                         <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <input
@@ -3227,311 +4002,13 @@ function App() {
                           </label>
                         </div>
 
-                        {/* Apartado Extra: Productos Fijos de la Promoción (Estética distintiva Esmeralda/Inventario) */}
-                        <div className="form-group" style={{ 
-                          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(5, 150, 105, 0.02) 100%)', 
-                          padding: '1.25rem', 
-                          borderRadius: '14px', 
-                          border: '1px solid rgba(16, 185, 129, 0.25)',
-                          boxShadow: '0 4px 15px rgba(0,0,0,0.05)'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            <div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span style={{ fontSize: '1.2rem' }}>📌</span>
-                                <label className="form-label" style={{ marginBottom: 0, fontWeight: '700', color: '#10b981', fontSize: '0.95rem' }}>
-                                  Productos Fijos de la Promoción
-                                </label>
-                              </div>
-                              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem', margin: 0 }}>
-                                Productos incluidos automáticamente al vender esta promo (sin selección manual).
-                              </p>
-                            </div>
-                            <span style={{ 
-                              background: 'rgba(16, 185, 129, 0.15)', 
-                              color: '#10b981', 
-                              padding: '0.25rem 0.65rem', 
-                              borderRadius: '20px', 
-                              fontSize: '0.72rem', 
-                              fontWeight: '700',
-                              border: '1px solid rgba(16, 185, 129, 0.3)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.3rem'
-                            }}>
-                              ⚡ Stock Automático
-                            </span>
-                          </div>
-
-                          {promoProductosFijos.length === 0 ? (
-                            <div style={{ 
-                              fontSize: '0.8rem', 
-                              color: 'var(--text-muted)', 
-                              textAlign: 'center', 
-                              padding: '1rem', 
-                              background: 'rgba(0, 0, 0, 0.05)', 
-                              border: '1px dashed rgba(16, 185, 129, 0.2)', 
-                              borderRadius: '10px',
-                              marginBottom: '0.85rem',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              gap: '0.3rem'
-                            }}>
-                              <span style={{ fontSize: '1.4rem' }}>📦</span>
-                              <span>No hay productos fijos en esta promoción aún.</span>
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '0.85rem' }}>
-                              {promoProductosFijos.map((pf) => (
-                                <div key={pf.producto_id} style={{ 
-                                  display: 'flex', 
-                                  alignItems: 'center', 
-                                  gap: '0.6rem', 
-                                  background: 'var(--item-bg)', 
-                                  padding: '0.4rem 0.75rem', 
-                                  borderRadius: '10px', 
-                                  fontSize: '0.85rem',
-                                  border: '1px solid rgba(16, 185, 129, 0.25)',
-                                  boxShadow: '0 2px 6px rgba(0,0,0,0.06)'
-                                }}>
-                                  <span style={{ 
-                                    background: '#10b981', 
-                                    color: 'white', 
-                                    padding: '0.1rem 0.45rem', 
-                                    borderRadius: '6px', 
-                                    fontWeight: 'bold', 
-                                    fontSize: '0.78rem' 
-                                  }}>
-                                    {pf.cantidad}x
-                                  </span>
-                                  <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{pf.nombre_producto}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => eliminarProductoFijoPromoForm(pf.producto_id)}
-                                    style={{ 
-                                      border: 'none', 
-                                      background: 'rgba(239, 68, 68, 0.1)', 
-                                      color: '#ef4444', 
-                                      cursor: 'pointer', 
-                                      fontSize: '0.8rem', 
-                                      padding: '0.2rem 0.4rem',
-                                      borderRadius: '4px',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      transition: 'all 0.2s ease'
-                                    }}
-                                    title="Quitar producto fijo"
-                                  >
-                                    🗑️
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
-                            <select
-                              className="form-input form-select"
-                              style={{ 
-                                height: '42px', 
-                                fontSize: '0.88rem', 
-                                flex: '1 1 auto', 
-                                minWidth: '180px', 
-                                background: 'var(--input-bg)', 
-                                color: 'var(--text-primary)', 
-                                padding: '0.4rem 0.85rem',
-                                borderRadius: '10px',
-                                border: '1px solid rgba(16, 185, 129, 0.3)'
-                              }}
-                              id="sel-fixed-product"
-                              defaultValue=""
-                            >
-                              <option value="" disabled>-- Seleccionar Producto del Catálogo --</option>
-                              {productos.map(p => (
-                                <option key={p.id} value={p.id}>{p.nombre} (${parseFloat(p.precio)})</option>
-                              ))}
-                            </select>
-                            <input
-                              type="number"
-                              className="form-input"
-                              placeholder="Cant"
-                              defaultValue="1"
-                              min="1"
-                              style={{ 
-                                width: '70px', 
-                                flexShrink: 0, 
-                                height: '42px', 
-                                fontSize: '0.9rem', 
-                                padding: '0.4rem 0.5rem', 
-                                textAlign: 'center',
-                                borderRadius: '10px',
-                                border: '1px solid rgba(16, 185, 129, 0.3)'
-                              }}
-                              id="cant-fixed-product"
-                            />
-                            <button
-                              type="button"
-                              style={{ 
-                                height: '42px', 
-                                width: 'auto', 
-                                flexShrink: 0, 
-                                padding: '0 1.25rem', 
-                                fontSize: '0.88rem', 
-                                fontWeight: 'bold', 
-                                whiteSpace: 'nowrap',
-                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                border: 'none',
-                                borderRadius: '10px',
-                                color: 'white',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.4rem',
-                                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-                                transition: 'all 0.2s ease'
-                              }}
-                              onClick={() => {
-                                const sel = document.getElementById('sel-fixed-product');
-                                const cant = document.getElementById('cant-fixed-product');
-                                if (sel && sel.value) {
-                                  agregarProductoFijoPromoForm(sel.value, cant.value || 1);
-                                  sel.value = "";
-                                  cant.value = "1";
-                                }
-                              }}
-                            >
-                              <span>➕ Incluir</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="form-group" style={{ marginTop: '0.5rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <label className="form-label" style={{ marginBottom: 0 }}>Pasos de Selección (Combo)</label>
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              onClick={agregarPasoPromoForm}
-                              style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
-                            >
-                              ➕ Agregar Paso
-                            </button>
-                          </div>
-
-                          {promoPasos.length === 0 ? (
-                            <p style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-secondary)', textAlign: 'center', padding: '1.5rem', border: '1px dashed rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                              Agrega al menos un paso para definir qué productos componen esta promoción.
-                            </p>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                              {promoPasos.map((paso, pIdx) => {
-                                const idKey = paso.id || paso.temp_id;
-                                const isReal = !!paso.id;
-                                return (
-                                  <div key={idKey} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', padding: '1rem' }}>
-                                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '0.75rem' }}>
-                                      <span style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
-                                        #{pIdx + 1}
-                                      </span>
-                                      <input
-                                        type="text"
-                                        className="form-input"
-                                        placeholder="Ej. Elige tu Bebida"
-                                        style={{ flex: 1, height: '32px', fontSize: '0.85rem' }}
-                                        value={paso.nombre_paso}
-                                        onChange={(e) => actualizarNombrePasoForm(idKey, isReal, e.target.value)}
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => eliminarPasoPromoForm(idKey, isReal)}
-                                        style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.3rem 0.5rem', borderRadius: '4px' }}
-                                        title="Eliminar Paso"
-                                      >
-                                        🗑️
-                                      </button>
-                                    </div>
-
-                                    {/* Opciones del paso */}
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                      <span style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Productos Opcionales en este Paso:</span>
-                                      {paso.opciones.length === 0 ? (
-                                        <p style={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>No hay opciones agregadas aún.</p>
-                                      ) : (
-                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                          {paso.opciones.map(opc => (
-                                            <div key={opc.producto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem' }}>
-                                              <span>{opc.nombre_producto}</span>
-                                              {parseFloat(opc.precio_adicional) > 0 && (
-                                                <span style={{ color: 'var(--accent-primary)', fontSize: '0.75rem' }}>
-                                                  (+${parseFloat(opc.precio_adicional)})
-                                                </span>
-                                              )}
-                                              <button
-                                                type="button"
-                                                onClick={() => eliminarOpcionDelPasoForm(idKey, isReal, opc.producto_id)}
-                                                style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '0.8rem', padding: '0 0.1rem' }}
-                                              >
-                                                &times;
-                                              </button>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-
-                                      {/* Añadir opción al paso */}
-                                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
-                                        <select
-                                          className="form-input form-select"
-                                          style={{ height: '38px', fontSize: '0.85rem', flex: '1 1 auto', minWidth: '180px', padding: '0.3rem 0.75rem', background: 'var(--input-bg)', color: 'var(--text-primary)' }}
-                                          id={`sel-prod-${idKey}`}
-                                          defaultValue=""
-                                        >
-                                          <option value="" disabled>-- Añadir Producto --</option>
-                                          {productos.map(p => (
-                                            <option key={p.id} value={p.id}>{p.nombre} (${parseFloat(p.precio)})</option>
-                                          ))}
-                                        </select>
-                                        <input
-                                          type="number"
-                                          className="form-input"
-                                          placeholder="Extra $"
-                                          style={{ width: '75px', flexShrink: 0, height: '38px', fontSize: '0.85rem', padding: '0.3rem 0.5rem', textAlign: 'center' }}
-                                          id={`extra-price-${idKey}`}
-                                        />
-                                        <button
-                                          type="button"
-                                          className="btn-primary"
-                                          style={{ height: '38px', width: 'auto', flexShrink: 0, padding: '0 1rem', fontSize: '0.85rem', fontWeight: '600', whiteSpace: 'nowrap' }}
-                                          onClick={() => {
-                                            const sel = document.getElementById(`sel-prod-${idKey}`);
-                                            const extra = document.getElementById(`extra-price-${idKey}`);
-                                            if (sel && sel.value) {
-                                              agregarOpcionAlPasoForm(idKey, isReal, sel.value, extra.value || 0);
-                                              sel.value = "";
-                                              extra.value = "";
-                                            }
-                                          }}
-                                        >
-                                          Añadir
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-
                         <button
                           type="submit"
                           className="btn-primary"
-                          style={{ width: '100%', height: '40px', marginTop: '1rem' }}
+                          style={{ width: '100%', height: '42px', marginTop: '0.5rem', fontWeight: 'bold', fontSize: '0.95rem' }}
                           disabled={promoLoading}
                         >
-                          {promoLoading ? 'Guardando...' : 'Guardar Promoción'}
+                          {promoLoading ? 'Guardando...' : (formatoPromoMode === 'pack' ? '⚡ Guardar Pack / Oferta' : 'Guardar Combo Personalizado')}
                         </button>
                       </form>
                     </>
@@ -3615,15 +4092,42 @@ function App() {
 
                           {/* Mostrar resumen de los pasos de la promo */}
                           {promo.pasos && promo.pasos.length > 0 && (
-                            <div style={{ paddingLeft: '1.75rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                              {promo.pasos.map((paso, idx) => (
-                                <div key={paso.id} style={{ marginTop: '0.25rem' }}>
-                                  <strong style={{ color: 'var(--text-primary)' }}>Paso {idx + 1}: {paso.nombre_paso}</strong>
-                                  <span style={{ color: 'var(--text-muted)' }}>
-                                    {' '}({paso.opciones.map(o => o.nombre_producto).join(', ')})
-                                  </span>
-                                </div>
-                              ))}
+                            <div style={{ paddingLeft: '1.75rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                              {promo.pasos.map((paso, idx) => {
+                                const catsFound = [...new Set(paso.opciones.map(o => {
+                                  const p = productos.find(pr => pr.id === o.producto_id);
+                                  return p?.categoria;
+                                }).filter(Boolean))];
+
+                                let resumenOpciones = '';
+                                if (catsFound.length === 1) {
+                                  resumenOpciones = `Categoría ${catsFound[0]} (${paso.opciones.length} opciones disponibles)`;
+                                } else if (paso.opciones.length > 3) {
+                                  const primeros3 = paso.opciones.slice(0, 3).map(o => o.nombre_producto).join(', ');
+                                  resumenOpciones = `${primeros3} y ${paso.opciones.length - 3} más...`;
+                                } else if (paso.opciones.length > 0) {
+                                  resumenOpciones = paso.opciones.map(o => o.nombre_producto).join(', ');
+                                } else {
+                                  resumenOpciones = 'Sin opciones registradas';
+                                }
+
+                                return (
+                                  <div key={paso.id || idx} style={{ marginTop: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <strong style={{ color: 'var(--text-primary)' }}>Paso {idx + 1}: {paso.nombre_paso}</strong>
+                                    <span style={{ 
+                                      background: 'rgba(139, 92, 246, 0.15)', 
+                                      color: '#a78bfa', 
+                                      border: '1px solid rgba(139, 92, 246, 0.3)', 
+                                      padding: '0.15rem 0.55rem', 
+                                      borderRadius: '12px', 
+                                      fontSize: '0.75rem', 
+                                      fontWeight: 'bold' 
+                                    }}>
+                                      🏷️ {resumenOpciones}
+                                    </span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -4738,7 +5242,29 @@ function App() {
                   {comandaData.productos.map((prod, idx) => (
                     <tr key={idx}>
                       <td>{prod.cantidad}</td>
-                      <td>{prod.nombre}</td>
+                      <td>
+                        <div style={{ fontWeight: 'bold' }}>{prod.nombre}</div>
+                        {prod.opciones_elegidas && prod.opciones_elegidas.length > 0 && (
+                          <div style={{ fontSize: '0.8rem', color: '#10b981', marginTop: '0.15rem', fontWeight: '600' }}>
+                            {(() => {
+                              const agrupados = prod.opciones_elegidas.reduce((acc, opt) => {
+                                const nombre = opt.nombre_producto;
+                                if (!acc[nombre]) {
+                                  acc[nombre] = { nombre_producto: nombre, cantidad: 0 };
+                                }
+                                acc[nombre].cantidad += 1;
+                                return acc;
+                              }, {});
+
+                              return Object.values(agrupados).map((optGroup, oIdx) => (
+                                <div key={oIdx}>
+                                  {optGroup.cantidad > 1 ? `${optGroup.cantidad}x ` : ''}{optGroup.nombre_producto}
+                                </div>
+                              ));
+                            })()}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ textAlign: 'right' }}>
                         ${(parseFloat(prod.precio) * prod.cantidad).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
                       </td>
@@ -4765,7 +5291,6 @@ function App() {
                 </span>
               </div>
             </div>
-
             {/* Acción de Cerrar */}
             <div className="comanda-actions" style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
               {window.electronAPI && (
@@ -4791,57 +5316,236 @@ function App() {
         </div>
       )}
 
-      {showPromoSelectorModal && selectedPromo && (
-        <div className="custom-modal-overlay">
-          <div className="custom-modal" style={{ maxWidth: '480px', width: '90%', padding: '1.75rem' }}>
-            <div className="custom-modal-header" style={{ marginBottom: '1.25rem' }}>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
-                {selectedPromo.emoji || '🎁'} Configurar Promoción: {selectedPromo.nombre}
-              </h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--accent-primary)', fontWeight: '700', marginTop: '0.35rem' }}>
-                Paso {currentPromoStepIndex + 1} de {selectedPromo.pasos.length}: {selectedPromo.pasos[currentPromoStepIndex].nombre_paso}
-              </p>
-            </div>
-            
-            <div className="custom-modal-body" style={{ maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.25rem' }}>
-              {selectedPromo.pasos[currentPromoStepIndex].opciones.map((opc) => (
-                <button
-                  key={opc.id}
-                  type="button"
-                  className="custom-modal-option"
-                  onClick={() => seleccionarOpcionPaso(opc)}
-                >
-                  <span style={{ fontWeight: '600' }}>{opc.nombre_producto}</span>
-                  {parseFloat(opc.precio_adicional) > 0 && (
-                    <span style={{ fontSize: '0.8rem', background: 'rgba(234, 88, 12, 0.15)', color: 'var(--accent-primary)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontWeight: 'bold' }}>
-                      +${parseFloat(opc.precio_adicional).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                    </span>
+      {showPromoSelectorModal && selectedPromo && selectedPromo.pasos && selectedPromo.pasos[currentPromoStepIndex] && (() => {
+        const pasoActual = selectedPromo.pasos[currentPromoStepIndex];
+        const isCategoryGrid = (pasoActual.opciones || []).length >= 6;
+
+        return (
+          <div className="custom-modal-overlay">
+            <div 
+              className="custom-modal" 
+              style={{ 
+                maxWidth: isCategoryGrid ? '1080px' : '550px', 
+                width: '95%', 
+                padding: '1.25rem 1.5rem', 
+                borderRadius: '20px', 
+                maxHeight: '90vh', 
+                display: 'flex', 
+                flexDirection: 'column' 
+              }}
+            >
+              <div className="custom-modal-header" style={{ marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--text-primary)', margin: 0 }}>
+                    {selectedPromo.emoji || '🎁'} {selectedPromo.nombre}
+                  </h3>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--accent-primary)', fontWeight: '700', marginTop: '0.2rem', margin: 0 }}>
+                    👉 {pasoActual.nombre_paso}
+                  </p>
+                  {chosenPromoOpciones.length > 0 && (
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
+                      {chosenPromoOpciones.map((opt, idx) => (
+                        <span key={idx} style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.35)', padding: '0.15rem 0.55rem', borderRadius: '10px', fontSize: '0.78rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                          ✅ Paso {idx + 1}: {opt.nombre_producto}
+                        </span>
+                      ))}
+                    </div>
                   )}
+                </div>
+                <span style={{ background: 'rgba(234, 88, 12, 0.2)', color: 'var(--accent-primary)', padding: '0.3rem 0.75rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 'bold', border: '1px solid rgba(234, 88, 12, 0.3)' }}>
+                  Paso {currentPromoStepIndex + 1} de {selectedPromo.pasos.length}
+                </span>
+              </div>
+              
+              {isCategoryGrid ? (
+                /* VISTA CUADRÍCULA (Para Promos de Categoría con muchas opciones como Churrascos) */
+                <div className="products-grid" style={{ 
+                  maxHeight: 'none', 
+                  overflowY: 'auto', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', 
+                  gap: '0.65rem', 
+                  marginTop: 0, 
+                  paddingRight: '0.25rem', 
+                  flex: 1 
+                }}>
+                  {(() => {
+                    const multiplier = (selectedPromo.pasos && selectedPromo.pasos.length) || 2;
+                    const preciosOpciones = (pasoActual.opciones || []).map(o => {
+                      const p = productos.find(pr => pr.id === o.producto_id);
+                      return p ? parseFloat(p.precio) || 0 : (parseFloat(o.precio_producto) || 0);
+                    }).filter(p => p > 0);
+
+                    let precioModaPaso = 0;
+                    if (preciosOpciones.length > 0) {
+                      const frecs = {};
+                      let maxF = 0;
+                      preciosOpciones.forEach(p => {
+                        frecs[p] = (frecs[p] || 0) + 1;
+                        if (frecs[p] > maxF) {
+                          maxF = frecs[p];
+                          precioModaPaso = p;
+                        }
+                      });
+                    }
+
+                    return (pasoActual.opciones || []).map((opc) => {
+                      const prodRef = productos.find(p => p.id === opc.producto_id);
+                      const emojiItem = prodRef?.imagen || '🍔';
+                      
+                      let extraVal = parseFloat(opc.precio_adicional) || 0;
+                      if (prodRef && precioModaPaso > 0) {
+                        const singleDiff = (parseFloat(prodRef.precio) || 0) - precioModaPaso;
+                        extraVal = singleDiff * multiplier;
+                      }
+
+                      const isChosenInPreviousStep = chosenPromoOpciones.some(opt => opt.producto_id === opc.producto_id);
+
+                      return (
+                        <div
+                          key={opc.id || opc.producto_id}
+                          className="product-card"
+                          onClick={() => seleccionarOpcionPaso(opc)}
+                          style={{ 
+                            position: 'relative', 
+                            padding: '0.65rem 0.5rem', 
+                            minHeight: '105px',
+                            borderColor: isChosenInPreviousStep ? '#10b981' : undefined,
+                            boxShadow: isChosenInPreviousStep ? '0 0 12px rgba(16, 185, 129, 0.4)' : undefined,
+                            background: isChosenInPreviousStep ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.03) 100%)' : undefined
+                          }}
+                        >
+                          {isChosenInPreviousStep && (
+                            <div style={{ 
+                              position: 'absolute', 
+                              top: '5px', 
+                              right: '5px', 
+                              background: '#10b981', 
+                              color: 'white', 
+                              borderRadius: '50%', 
+                              width: '20px', 
+                              height: '20px', 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'center', 
+                              fontSize: '0.75rem', 
+                              fontWeight: '800', 
+                              boxShadow: '0 2px 6px rgba(16, 185, 129, 0.5)',
+                              zIndex: 2
+                            }} title="Seleccionado">
+                              ✓
+                            </div>
+                          )}
+                          <div className="product-emoji" style={{ fontSize: '1.6rem', marginBottom: '0.15rem' }}>{emojiItem}</div>
+                          <div className="product-info" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: 1, width: '100%' }}>
+                            <h4 className="product-name" style={{ fontSize: '0.78rem', lineHeight: '1.2', minHeight: '2.4em', maxHeight: 'none', margin: '0 0 0.2rem 0', wordBreak: 'break-word' }}>
+                              {opc.nombre_producto}
+                            </h4>
+                            <div className="product-price" style={{ marginTop: 'auto', fontSize: '0.82rem' }}>
+                              {extraVal > 0 ? (
+                                <span style={{ color: '#ef4444', fontWeight: '800' }}>
+                                  +${extraVal.toLocaleString('es-CL')}
+                                </span>
+                              ) : extraVal < 0 ? (
+                                <span style={{ color: '#3b82f6', fontWeight: '800' }}>
+                                  -${Math.abs(extraVal).toLocaleString('es-CL')}
+                                </span>
+                              ) : (
+                                <span style={{ color: '#10b981', fontSize: '0.78rem', fontWeight: '700' }}>
+                                  Incluido
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              ) : (
+                /* VISTA LISTA VERTICAL (Para Promos 1, 2, 3, 4 y combos con pocas opciones seleccionadas a mano) */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', overflowY: 'auto', flex: 1, paddingRight: '0.25rem' }}>
+                  {(pasoActual.opciones || []).map((opc) => {
+                    const prodRef = productos.find(p => p.id === opc.producto_id);
+                    const emojiItem = prodRef?.imagen || '🎁';
+                    const extraVal = parseFloat(opc.precio_adicional) || 0;
+                    const isChosenInPreviousStep = chosenPromoOpciones.some(opt => opt.producto_id === opc.producto_id);
+
+                    return (
+                      <button
+                        key={opc.id || opc.producto_id}
+                        type="button"
+                        className="btn-select-option-list"
+                        onClick={() => seleccionarOpcionPaso(opc)}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '0.85rem 1.1rem',
+                          borderRadius: '14px',
+                          background: isChosenInPreviousStep 
+                            ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(16, 185, 129, 0.05) 100%)' 
+                            : 'rgba(255, 255, 255, 0.04)',
+                          border: isChosenInPreviousStep 
+                            ? '1.5px solid #10b981' 
+                            : '1.5px solid rgba(255, 255, 255, 0.08)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.95rem',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          textAlign: 'left'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span style={{ fontSize: '1.4rem' }}>{emojiItem}</span>
+                          <span style={{ fontWeight: '700' }}>{opc.nombre_producto}</span>
+                          {isChosenInPreviousStep && (
+                            <span style={{ background: '#10b981', color: 'white', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 'bold' }}>✓</span>
+                          )}
+                        </div>
+                        <div>
+                          {extraVal > 0 ? (
+                            <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
+                              +${extraVal.toLocaleString('es-CL')}
+                            </span>
+                          ) : extraVal < 0 ? (
+                            <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
+                              -${Math.abs(extraVal).toLocaleString('es-CL')}
+                            </span>
+                          ) : (
+                            <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
+                              Incluido
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              
+              <div className="custom-modal-actions" style={{ marginTop: '0.85rem', display: 'flex', gap: '1rem', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ flex: 1, padding: '0.6rem 1rem', fontSize: '0.88rem', fontWeight: 'bold' }}
+                  onClick={() => {
+                    if (currentPromoStepIndex > 0) {
+                      setCurrentPromoStepIndex(currentPromoStepIndex - 1);
+                      setChosenPromoOpciones(chosenPromoOpciones.slice(0, -1));
+                    } else {
+                      setShowPromoSelectorModal(false);
+                      setSelectedPromo(null);
+                    }
+                  }}
+                >
+                  {currentPromoStepIndex > 0 ? '⬅️ Volver al Paso Anterior' : '❌ Cancelar'}
                 </button>
-              ))}
-            </div>
-            
-            <div className="custom-modal-actions" style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem' }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  if (currentPromoStepIndex > 0) {
-                    setCurrentPromoStepIndex(currentPromoStepIndex - 1);
-                    setChosenPromoOpciones(chosenPromoOpciones.slice(0, -1));
-                  } else {
-                    setShowPromoSelectorModal(false);
-                    setSelectedPromo(null);
-                  }
-                }}
-              >
-                {currentPromoStepIndex > 0 ? 'Volver' : 'Cancelar'}
-              </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       
       {!user && (
         <button 
