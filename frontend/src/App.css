@@ -623,7 +623,7 @@ body.dark-theme .form-select option {
 .product-card {
   background: var(--item-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 14px;
+  border-radius: 22px;
   padding: 0.85rem;
   display: flex;
   flex-direction: column;
@@ -1146,7 +1146,7 @@ body.dark-theme .form-select option {
   align-items: center;
   background: var(--item-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 12px;
+  border-radius: 18px;
   padding: 0.85rem 1.25rem;
   transition: all 0.3s ease;
 }
@@ -2288,6 +2288,87 @@ body:not(.dark-theme) .custom-modal-option:hover {
   text-align: center;
   margin: 0.5rem 0;
   font-style: italic;
+}
+
+/* =======================================================
+   MEJORAS COMPLETAS DE CONTRASTE PARA EL TEMA CLARO
+   ======================================================= */
+body:not(.dark-theme) {
+  --text-primary: #1a0f08 !important; /* Espresso profundo */
+  --text-secondary: #4a280e !important; /* Cacao oscuro */
+  --text-muted: #734219 !important; /* Bronce intenso */
+}
+
+/* Textos principales, títulos y etiquetas */
+body:not(.dark-theme) .section-title,
+body:not(.dark-theme) .section-subtitle,
+body:not(.dark-theme) .product-name,
+body:not(.dark-theme) .user-list-name,
+body:not(.dark-theme) .category-btn-text,
+body:not(.dark-theme) .cierre-item-name,
+body:not(.dark-theme) h1, body:not(.dark-theme) h2, 
+body:not(.dark-theme) h3, body:not(.dark-theme) h4, 
+body:not(.dark-theme) h5, body:not(.dark-theme) h6 {
+  color: #1a0f08 !important;
+}
+
+body:not(.dark-theme) p,
+body:not(.dark-theme) label,
+body:not(.dark-theme) .ingredients-label,
+body:not(.dark-theme) .product-list-ingredients,
+body:not(.dark-theme) .cierre-card-obs p {
+  color: #4a280e !important;
+}
+
+body:not(.dark-theme) .product-price {
+  color: #c2410c !important;
+  font-weight: 800 !important;
+}
+
+/* Sub-tarjetas, cajas de resumen y listas en Cierre/Historial/Promociones */
+body:not(.dark-theme) .cierre-live-summary,
+body:not(.dark-theme) .cierre-sub-card,
+body:not(.dark-theme) .cierre-list-item {
+  background: rgba(255, 255, 255, 0.45) !important;
+  border: 1.5px solid rgba(70, 35, 10, 0.4) !important;
+  color: #1a0f08 !important;
+}
+
+body:not(.dark-theme) .cierre-list-item:hover {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: #ea580c !important;
+}
+
+body:not(.dark-theme) .live-row,
+body:not(.dark-theme) .cierre-sub-card-title {
+  color: #2a1708 !important;
+  font-weight: 700 !important;
+}
+
+/* Badges e insiginas en Tema Claro */
+body:not(.dark-theme) .badge {
+  color: #1a0f08 !important;
+  font-weight: 700 !important;
+}
+
+body:not(.dark-theme) .badge-admin {
+  background: rgba(5, 150, 105, 0.18) !important;
+  color: #047857 !important;
+  border: 1px solid rgba(4, 120, 87, 0.4) !important;
+}
+
+/* Inputs y Selects */
+body:not(.dark-theme) .form-input,
+body:not(.dark-theme) .form-select,
+body:not(.dark-theme) .search-input {
+  border: 1.5px solid rgba(70, 35, 10, 0.45) !important;
+  color: #1a0f08 !important;
+  font-weight: 600 !important;
+}
+
+body:not(.dark-theme) .form-input::placeholder,
+body:not(.dark-theme) .search-input::placeholder {
+  color: #734219 !important;
 }
 
 

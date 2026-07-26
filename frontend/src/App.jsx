@@ -56,10 +56,10 @@ const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- B
           left: 0,
           right: 0,
           marginTop: '4px',
-          background: 'var(--card-bg, #1a0f08)',
-          border: '1px solid var(--accent-primary)',
-          borderRadius: '10px',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
+          background: 'var(--item-bg)',
+          border: '1.5px solid var(--accent-primary)',
+          borderRadius: '12px',
+          boxShadow: 'var(--card-shadow)',
           zIndex: 99999,
           overflow: 'hidden',
           padding: '0.4rem'
@@ -77,7 +77,8 @@ const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- B
               height: '34px',
               fontSize: '0.82rem',
               marginBottom: '0.4rem',
-              background: 'rgba(255, 255, 255, 0.08)'
+              background: 'var(--input-bg)',
+              color: 'var(--text-primary)'
             }}
           />
           <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
@@ -2254,15 +2255,67 @@ function App() {
                             ? promociones.filter(promo => promo.activo !== false)
                             : productos.filter((prod) => (categoriaSeleccionada === 'Todos' && prod.categoria !== 'Promociones') || prod.categoria === categoriaSeleccionada);
 
-                          const ITEMS_POR_PAGINA = 15;
-                          const totalPaginas = Math.ceil(itemsFiltrados.length / ITEMS_POR_PAGINA) || 1;
-                          const paginaActual = Math.min(paginaProductos, totalPaginas);
-                          const startIndex = (paginaActual - 1) * ITEMS_POR_PAGINA;
-                          const itemsPagina = itemsFiltrados.slice(startIndex, startIndex + ITEMS_POR_PAGINA);
-                          const requierePaginacion = itemsFiltrados.length > ITEMS_POR_PAGINA;
+                          const requierePaginacion = itemsFiltrados.length > 16;
+                          let totalPaginas = 1;
+                          let paginaActual = 1;
+                          let itemsPagina = itemsFiltrados;
+
+                          if (requierePaginacion) {
+                            totalPaginas = 1 + Math.ceil((itemsFiltrados.length - 15) / 14);
+                            paginaActual = Math.min(paginaProductos, totalPaginas);
+
+                            let startIndex = 0;
+                            let count = 14;
+
+                            if (paginaActual === 1) {
+                              startIndex = 0;
+                              count = 15;
+                            } else if (paginaActual === totalPaginas) {
+                              startIndex = 15 + (paginaActual - 2) * 14;
+                              count = 15;
+                            } else {
+                              startIndex = 15 + (paginaActual - 2) * 14;
+                              count = 14;
+                            }
+
+                            itemsPagina = itemsFiltrados.slice(startIndex, startIndex + count);
+                          }
 
                           return (
                             <>
+                              {/* Cuadrícula 1: Card de Retroceder (Solo si no es la primera página) */}
+                              {requierePaginacion && paginaActual > 1 && (
+                                <div 
+                                  className="product-card pagination-card prev-page"
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setPaginaProductos(paginaActual - 1); 
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: '0.85rem 0.5rem',
+                                    background: 'var(--item-bg)',
+                                    border: '2px dashed var(--accent-primary)',
+                                    boxShadow: '0 4px 15px var(--accent-glow)',
+                                    borderRadius: '22px',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="Página anterior"
+                                >
+                                  <div className="pagination-icon" style={{ fontSize: '2.2rem' }}>⬅️</div>
+                                  <span style={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0.2rem 0' }}>
+                                    Retroceder
+                                  </span>
+                                  <span className="pagination-text" style={{ fontSize: '0.75rem' }}>
+                                    Pág. {paginaActual} de {totalPaginas}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Cuadrículas intermedias: Productos de la página */}
                               {itemsPagina.map((item) => {
                                 if (categoriaSeleccionada === 'Promociones') {
                                   return (
@@ -2297,47 +2350,36 @@ function App() {
                                 );
                               })}
 
-                              {/* Cuadro 16: Card de Paginación con solo la Flecha y Pág. X de Y */}
-                              {requierePaginacion && (
-                                paginaActual === 1 ? (
-                                  <div 
-                                    className="product-card pagination-card next-page" 
-                                    onClick={() => setPaginaProductos(2)}
-                                    title="Página siguiente"
-                                  >
-                                    <div className="pagination-icon">➡️</div>
-                                    <span className="pagination-text">Pág. 1 de {totalPaginas}</span>
-                                  </div>
-                                ) : paginaActual < totalPaginas ? (
-                                  <div className="product-card pagination-card multi-page">
-                                    <div className="pagination-split-buttons">
-                                      <button 
-                                        className="btn-page-split prev" 
-                                        onClick={(e) => { e.stopPropagation(); setPaginaProductos(p => p - 1); }}
-                                        title="Página anterior"
-                                      >
-                                        ⬅️
-                                      </button>
-                                      <button 
-                                        className="btn-page-split next" 
-                                        onClick={(e) => { e.stopPropagation(); setPaginaProductos(p => p + 1); }}
-                                        title="Página siguiente"
-                                      >
-                                        ➡️
-                                      </button>
-                                    </div>
-                                    <span className="pagination-text" style={{ marginTop: '0.4rem' }}>Pág. {paginaActual} de {totalPaginas}</span>
-                                  </div>
-                                ) : (
-                                  <div 
-                                    className="product-card pagination-card prev-page" 
-                                    onClick={() => setPaginaProductos(p => p - 1)}
-                                    title="Página anterior"
-                                  >
-                                    <div className="pagination-icon">⬅️</div>
-                                    <span className="pagination-text">Pág. {paginaActual} de {totalPaginas}</span>
-                                  </div>
-                                )
+                              {/* Cuadrícula Final: Card de Continuar (Solo si no es la última página) */}
+                              {requierePaginacion && paginaActual < totalPaginas && (
+                                <div 
+                                  className="product-card pagination-card next-page"
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setPaginaProductos(paginaActual + 1); 
+                                  }}
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: '0.85rem 0.5rem',
+                                    background: 'var(--item-bg)',
+                                    border: '2px dashed var(--accent-primary)',
+                                    boxShadow: '0 4px 15px var(--accent-glow)',
+                                    borderRadius: '22px',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="Página siguiente"
+                                >
+                                  <div className="pagination-icon" style={{ fontSize: '2.2rem' }}>➡️</div>
+                                  <span style={{ fontWeight: 'bold', fontSize: '0.85rem', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0.2rem 0' }}>
+                                    Continuar
+                                  </span>
+                                  <span className="pagination-text" style={{ fontSize: '0.75rem' }}>
+                                    Pág. {paginaActual} de {totalPaginas}
+                                  </span>
+                                </div>
                               )}
                             </>
                           );
@@ -2986,7 +3028,7 @@ function App() {
                               productos
                                 .filter(p => p.categoria === selectedCatForProducts.nombre)
                                 .map(p => (
-                                  <div key={p.id} className="user-list-item" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '0.75rem 1rem' }}>
+                                  <div key={p.id} className="user-list-item" style={{ background: 'var(--item-bg)', border: '1px solid var(--glass-border)', padding: '0.75rem 1rem' }}>
                                     <div className="user-list-info" style={{ flexGrow: 1 }}>
                                       <span className="user-list-name">
                                         {p.imagen || '🍔'} {p.nombre}
@@ -3384,10 +3426,10 @@ function App() {
                               justifyContent: 'space-between', 
                               alignItems: 'center', 
                               padding: '0.75rem 1rem', 
-                              background: selectedCatForProducts?.id === cat.id ? 'var(--item-bg-hover)' : 'rgba(255, 255, 255, 0.03)', 
-                              border: selectedCatForProducts?.id === cat.id ? '1px solid var(--accent-primary)' : '1px solid rgba(255, 255, 255, 0.05)', 
-                              borderRadius: 'var(--radius-md)',
-                              boxShadow: selectedCatForProducts?.id === cat.id ? '0 0 12px var(--accent-glow)' : 'none'
+                              background: selectedCatForProducts?.id === cat.id ? 'var(--item-bg-hover)' : 'var(--item-bg)', 
+                              border: selectedCatForProducts?.id === cat.id ? '1.5px solid var(--accent-primary)' : '1px solid var(--glass-border)', 
+                              borderRadius: '22px',
+                              boxShadow: selectedCatForProducts?.id === cat.id ? '0 0 12px var(--accent-glow)' : 'var(--card-shadow)'
                             }}
                           >
                             <span className="admin-category-item-name" style={{ fontWeight: '500', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -4044,7 +4086,7 @@ function App() {
                   {!promocionesLoading && !promoError && promociones.length > 0 && (
                     <div className="users-list-container" style={{ flex: 1, overflowY: 'auto', marginTop: '1rem' }}>
                       {promociones.map((promo) => (
-                        <div key={promo.id} className="user-list-item" style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', border: '1px solid rgba(255,255,255,0.03)', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                        <div key={promo.id} className="user-list-item" style={{ background: 'var(--item-bg)', padding: '1rem', border: '1px solid var(--glass-border)', boxShadow: 'var(--card-shadow)', borderRadius: '22px', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <span style={{ fontSize: '1.25rem' }}>{promo.emoji || '🎁'}</span>
@@ -5009,7 +5051,7 @@ function App() {
                     </div>
 
                     {/* Columna Derecha: Tabla de Ingredientes y cantidades */}
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--item-bg)', borderRadius: '22px', padding: '1.25rem', border: '1.5px solid var(--glass-border)', boxShadow: 'var(--card-shadow)' }}>
                       <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📋 Existencias Actuales</h4>
 
                       {listaIngredientes.length === 0 ? (
@@ -5020,10 +5062,10 @@ function App() {
                         <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                             <thead>
-                              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                                <th style={{ padding: '0.5rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Ingrediente</th>
-                                <th style={{ padding: '0.5rem', color: 'var(--text-secondary)', fontWeight: '600', textAlign: 'right' }}>Stock Disponible</th>
-                                <th style={{ padding: '0.5rem', color: 'var(--text-secondary)', fontWeight: '600', textAlign: 'center' }}>Acciones</th>
+                              <tr style={{ borderBottom: '2px solid var(--glass-border)' }}>
+                                <th style={{ padding: '0.65rem 0.5rem', color: 'var(--text-primary)', fontWeight: '700' }}>Ingrediente</th>
+                                <th style={{ padding: '0.65rem 0.5rem', color: 'var(--text-primary)', fontWeight: '700', textAlign: 'right' }}>Stock Disponible</th>
+                                <th style={{ padding: '0.65rem 0.5rem', color: 'var(--text-primary)', fontWeight: '700', textAlign: 'center' }}>Acciones</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -5031,8 +5073,8 @@ function App() {
                                 const stockNum = parseFloat(ing.stock);
                                 const isLowStock = stockNum <= 50; // alerta de stock bajo
                                 return (
-                                  <tr key={ing.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', verticalAlign: 'middle' }}>
-                                    <td style={{ padding: '0.75rem 0.5rem', fontWeight: '500', color: 'var(--text-primary)' }}>
+                                  <tr key={ing.id} style={{ borderBottom: '1px solid var(--glass-border)', verticalAlign: 'middle' }}>
+                                    <td style={{ padding: '0.75rem 0.5rem', fontWeight: '600', color: 'var(--text-primary)' }}>
                                       {ing.nombre}
                                     </td>
                                     <td style={{ padding: '0.75rem 0.5rem', textAlign: 'right', fontWeight: '700', color: isLowStock ? 'var(--error)' : 'var(--text-primary)' }}>
@@ -5044,7 +5086,7 @@ function App() {
                                         <button
                                           type="button"
                                           onClick={() => iniciarEdicionIng(ing)}
-                                          style={{ background: 'rgba(255,255,255,0.05)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: '8px' }}
+                                          style={{ background: 'var(--btn-secondary-bg)', border: '1px solid var(--glass-border)', cursor: 'pointer', padding: '0.45rem 0.6rem', borderRadius: '10px' }}
                                           title="Editar ingrediente / stock"
                                         >
                                           ✏️
@@ -5052,7 +5094,7 @@ function App() {
                                         <button
                                           type="button"
                                           onClick={() => handleDeleteIngredient(ing.id, ing.nombre)}
-                                          style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', cursor: 'pointer', padding: '0.4rem', borderRadius: '8px' }}
+                                          style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', cursor: 'pointer', padding: '0.45rem 0.6rem', borderRadius: '10px' }}
                                           title="Eliminar ingrediente"
                                         >
                                           🗑️
@@ -5481,13 +5523,14 @@ function App() {
                           justifyContent: 'space-between',
                           alignItems: 'center',
                           padding: '0.85rem 1.1rem',
-                          borderRadius: '14px',
+                          borderRadius: '22px',
                           background: isChosenInPreviousStep 
                             ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(16, 185, 129, 0.05) 100%)' 
-                            : 'rgba(255, 255, 255, 0.04)',
+                            : 'var(--item-bg)',
                           border: isChosenInPreviousStep 
                             ? '1.5px solid #10b981' 
-                            : '1.5px solid rgba(255, 255, 255, 0.08)',
+                            : '1.5px solid var(--glass-border)',
+                          boxShadow: 'var(--card-shadow)',
                           color: 'var(--text-primary)',
                           fontSize: '0.95rem',
                           fontWeight: '600',
@@ -5505,16 +5548,16 @@ function App() {
                         </div>
                         <div>
                           {extraVal > 0 ? (
-                            <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
+                            <span className="badge" style={{ background: 'rgba(239, 68, 68, 0.15)', color: 'var(--error)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
                               +${extraVal.toLocaleString('es-CL')}
                             </span>
                           ) : extraVal < 0 ? (
-                            <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
+                            <span className="badge" style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
                               -${Math.abs(extraVal).toLocaleString('es-CL')}
                             </span>
                           ) : (
-                            <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '0.2rem 0.6rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
-                              Incluido
+                            <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.18)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.35)', padding: '0.2rem 0.65rem', borderRadius: '12px', fontSize: '0.82rem', fontWeight: 'bold' }}>
+                              INCLUIDO
                             </span>
                           )}
                         </div>

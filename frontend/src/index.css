@@ -9,12 +9,12 @@
   /* Colores de acento */
   --accent-primary: #ea580c; /* Naranja Hermès premium */
   --accent-primary-hover: #c2410c; /* Naranja más oscuro */
-  --accent-glow: rgba(234, 88, 12, 0.2);
+  --accent-glow: rgba(234, 88, 12, 0.25);
   
-  /* Glassmorphism claro y cálido */
-  --glass-bg: rgba(237, 191, 116, 0.88); /* #edbf74 semi-opaco */
-  --glass-border: rgba(87, 56, 35, 0.12); /* Borde cacao medio */
-  --card-shadow: 0 15px 45px rgba(87, 56, 35, 0.08);
+  /* Glassmorphism claro y cálido original con bordes de alto contraste */
+  --glass-bg: rgba(237, 191, 116, 0.88); /* Fondo cálido original */
+  --glass-border: rgba(70, 35, 10, 0.65); /* Borde cacao nítido con alto contraste */
+  --card-shadow: 0 6px 20px rgba(70, 35, 10, 0.15), 0 2px 6px rgba(70, 35, 10, 0.08);
   
   /* Textos elegantes oscuros (Café Cacao / Bronce) */
   --text-primary: #2a1708; /* Espresso profundo */
@@ -25,21 +25,21 @@
   --success: #059669; /* Verde más oscuro para contraste en fondo claro */
   --error: #dc2626; /* Rojo más oscuro para contraste */
 
-  /* Variables semánticas para componentes (usando tonos claros translúcidos sobre la tarjeta dorada) */
-  --item-bg: rgba(255, 255, 255, 0.35);
-  --item-bg-hover: rgba(255, 255, 255, 0.65);
-  --input-bg: rgba(255, 255, 255, 0.5);
+  /* Variables semánticas originales para componentes */
+  --item-bg: rgba(255, 255, 255, 0.65);
+  --item-bg-hover: rgba(255, 255, 255, 0.85);
+  --input-bg: rgba(255, 255, 255, 0.75);
   --input-focus-bg: #ffffff;
-  --btn-secondary-bg: rgba(255, 255, 255, 0.3);
-  --btn-secondary-hover-bg: rgba(255, 255, 255, 0.65);
+  --btn-secondary-bg: rgba(255, 255, 255, 0.5);
+  --btn-secondary-hover-bg: rgba(255, 255, 255, 0.85);
   
-  /* Estilos del ticket de comanda (muy oscuros y legibles en negrita) */
+  /* Estilos del ticket de comanda */
   --ticket-bg: var(--glass-bg);
-  --ticket-text: #050302; /* Casi negro sólido */
-  --ticket-text-secondary: #1a0f08; /* Café cacao oscuro */
-  --ticket-text-muted: #3a2211; /* Café medio oscuro */
-  --ticket-border: rgba(26, 15, 8, 0.75); /* Borde café oscuro más visible y nítido */
-  --ticket-total: #b91c1c; /* Rojo de ticket clásico para el total */
+  --ticket-text: #050302;
+  --ticket-text-secondary: #1a0f08;
+  --ticket-text-muted: #3a2211;
+  --ticket-border: rgba(26, 15, 8, 0.75);
+  --ticket-total: #b91c1c;
   --ticket-shadow: var(--card-shadow);
 }
 
