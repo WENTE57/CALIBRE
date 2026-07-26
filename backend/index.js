@@ -42,7 +42,11 @@ app.use(express.json()); // Permite procesar peticiones JSON
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nota TEXT");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_entrega VARCHAR(50) DEFAULT 'Servir'");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_transaccion VARCHAR(50) DEFAULT 'Efectivo'");
-    console.log("✅ Tabla 'pedidos' asegurada (con columnas 'nota', 'tipo_entrega' y 'tipo_transaccion').");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_efectivo DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_debito DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_credito DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pago_mixto_detalle TEXT");
+    console.log("✅ Tabla 'pedidos' asegurada (con columnas 'nota', 'tipo_entrega', 'tipo_transaccion', 'monto_efectivo', 'monto_debito', 'monto_credito', 'pago_mixto_detalle').");
 
     // 4. Asegurar tabla pedido_productos
     await pool.query(`
@@ -1075,7 +1079,19 @@ app.post('/api/categorias/reordenar', async (req, res) => {
 
 // Endpoint de Registrar Pedido
 app.post('/api/pedidos', async (req, res) => {
-  const { cliente_nombre, total, atendido_por, productos, nota, tipo_entrega, tipo_transaccion } = req.body;
+  const { 
+    cliente_nombre, 
+    total, 
+    atendido_por, 
+    productos, 
+    nota, 
+    tipo_entrega, 
+    tipo_transaccion,
+    monto_efectivo,
+    monto_debito,
+    monto_credito,
+    pago_mixto_detalle
+  } = req.body;
 
   if (!cliente_nombre || !total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
     return res.status(400).json({
@@ -1084,14 +1100,32 @@ app.post('/api/pedidos', async (req, res) => {
     });
   }
 
+  const numTotal = parseFloat(total) || 0;
+  let finalEfec = 0;
+  let finalDeb = 0;
+  let finalCred = 0;
+  const transTipo = tipo_transaccion || 'Efectivo';
+
+  if (transTipo === 'Mixto') {
+    finalEfec = parseFloat(monto_efectivo) || 0;
+    finalDeb = parseFloat(monto_debito) || 0;
+    finalCred = parseFloat(monto_credito) || 0;
+  } else if (transTipo === 'Débito') {
+    finalDeb = numTotal;
+  } else if (transTipo === 'Crédito') {
+    finalCred = numTotal;
+  } else {
+    finalEfec = numTotal;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // 1. Insertar la cabecera del pedido
     const orderRes = await client.query(
-      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, fecha_hora',
-      [cliente_nombre.trim(), total, atendido_por.trim(), nota ? nota.trim() : null, tipo_entrega || 'Servir', tipo_transaccion || 'Efectivo']
+      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, fecha_hora',
+      [cliente_nombre.trim(), total, atendido_por.trim(), nota ? nota.trim() : null, tipo_entrega || 'Servir', transTipo, finalEfec, finalDeb, finalCred, pago_mixto_detalle ? String(pago_mixto_detalle).trim() : null]
     );
     const pedidoId = orderRes.rows[0].id;
     const fechaHora = orderRes.rows[0].fecha_hora;
@@ -1202,6 +1236,7 @@ app.get('/api/pedidos', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT p.id, p.cliente_nombre, p.total, p.fecha_hora, p.atendido_por, p.nota, p.tipo_entrega, p.tipo_transaccion,
+             p.monto_efectivo, p.monto_debito, p.monto_credito, p.pago_mixto_detalle,
              COALESCE(
                json_agg(
                  json_build_object(
@@ -1245,9 +1280,9 @@ app.get('/api/informes/cierre', async (req, res) => {
         COALESCE(SUM(total), 0)::FLOAT as total_ventas,
         MIN(id) as ticket_inicio,
         MAX(id) as ticket_fin,
-        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total ELSE 0 END), 0)::FLOAT as total_efectivo,
-        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Débito' THEN total ELSE 0 END), 0)::FLOAT as total_debito,
-        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Crédito' THEN total ELSE 0 END), 0)::FLOAT as total_credito
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Débito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_debito, 0) ELSE 0 END), 0)::FLOAT as total_debito,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Crédito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_credito, 0) ELSE 0 END), 0)::FLOAT as total_credito
       FROM pedidos
       WHERE DATE(fecha_hora) = $1
     `, [fecha]);
@@ -1449,8 +1484,8 @@ app.get('/api/informes/excel', async (req, res) => {
     const result = await pool.query(`
       SELECT 
         TO_CHAR(fecha_hora, 'YYYY-MM-DD') as fecha,
-        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total ELSE 0 END), 0)::FLOAT as total_efectivo,
-        COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total ELSE 0 END), 0)::FLOAT as total_tarjeta,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0)::FLOAT as total_tarjeta,
         COALESCE(SUM(total), 0)::FLOAT as total_ventas
       FROM pedidos
       WHERE TO_CHAR(fecha_hora, 'YYYY-MM') = $1

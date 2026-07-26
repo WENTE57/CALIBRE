@@ -245,7 +245,10 @@ function App() {
   const [clienteNombre, setClienteNombre] = useState('');
   const [pedidoNota, setPedidoNota] = useState('');
   const [tipoEntrega, setTipoEntrega] = useState('Servir');
-  const [tipoTransaccion, setTipoTransaccion] = useState('Efectivo'); // 'Efectivo' o 'Crédito'
+  const [tipoTransaccion, setTipoTransaccion] = useState('Efectivo'); // 'Efectivo', 'Débito', 'Crédito', 'Mixto'
+  const [montoEfectivoMixto, setMontoEfectivoMixto] = useState('');
+  const [montoDebitoMixto, setMontoDebitoMixto] = useState('');
+  const [montoCreditoMixto, setMontoCreditoMixto] = useState('');
   const [comandaData, setComandaData] = useState(null);
   const [historialPedidos, setHistorialPedidos] = useState([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
@@ -1798,6 +1801,9 @@ function App() {
     setPedidoNota('');
     setTipoEntrega('Servir');
     setTipoTransaccion('Efectivo');
+    setMontoEfectivoMixto('');
+    setMontoDebitoMixto('');
+    setMontoCreditoMixto('');
     setShowPromptCliente(true);
   };
 
@@ -1810,6 +1816,40 @@ function App() {
 
     const totalPedido = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
     const atendidoPor = user ? user.nombre : 'Desconocido';
+
+    let montoEfec = 0;
+    let montoDeb = 0;
+    let montoCred = 0;
+    let detalleMixto = null;
+
+    if (tipoTransaccion === 'Mixto') {
+      montoEfec = parseFloat(montoEfectivoMixto) || 0;
+      montoDeb = parseFloat(montoDebitoMixto) || 0;
+      montoCred = parseFloat(montoCreditoMixto) || 0;
+      const sumaIngresada = montoEfec + montoDeb + montoCred;
+
+      if (Math.abs(sumaIngresada - totalPedido) > 0.01) {
+        abrirAlerta(`La suma de los montos ingresados ($${sumaIngresada.toLocaleString('es-CL')}) debe ser exactamente igual al total del pedido ($${totalPedido.toLocaleString('es-CL')}).`, 'Error en Pago Mixto');
+        return;
+      }
+
+      if (sumaIngresada === 0) {
+        abrirAlerta('Por favor ingresa los montos correspondientes para el pago mixto.', 'Pago Mixto Vacío');
+        return;
+      }
+
+      const partes = [];
+      if (montoEfec > 0) partes.push(`Efec: $${montoEfec.toLocaleString('es-CL')}`);
+      if (montoDeb > 0) partes.push(`Déb: $${montoDeb.toLocaleString('es-CL')}`);
+      if (montoCred > 0) partes.push(`Créd: $${montoCred.toLocaleString('es-CL')}`);
+      detalleMixto = partes.join(' | ');
+    } else if (tipoTransaccion === 'Débito') {
+      montoDeb = totalPedido;
+    } else if (tipoTransaccion === 'Crédito') {
+      montoCred = totalPedido;
+    } else {
+      montoEfec = totalPedido;
+    }
 
     const payload = {
       cliente_nombre: clienteNombre.trim(),
@@ -1826,7 +1866,11 @@ function App() {
       })),
       nota: pedidoNota.trim() || null,
       tipo_entrega: tipoEntrega,
-      tipo_transaccion: tipoTransaccion
+      tipo_transaccion: tipoTransaccion,
+      monto_efectivo: montoEfec,
+      monto_debito: montoDeb,
+      monto_credito: montoCred,
+      pago_mixto_detalle: detalleMixto
     };
 
     try {
@@ -1848,7 +1892,11 @@ function App() {
           atendido_por: atendidoPor,
           nota: payload.nota,
           tipo_entrega: payload.tipo_entrega,
-          tipo_transaccion: payload.tipo_transaccion
+          tipo_transaccion: payload.tipo_transaccion,
+          monto_efectivo: payload.monto_efectivo,
+          monto_debito: payload.monto_debito,
+          monto_credito: payload.monto_credito,
+          pago_mixto_detalle: payload.pago_mixto_detalle
         };
         setComandaData(newComanda);
 
@@ -2715,7 +2763,11 @@ function App() {
                             <option value="🍔">🍔 Hamburguesa</option>
                             <option value="🧀">🧀 Queso / Cheeseburger</option>
                             <option value="🍟">🍟 Papas Fritas</option>
-                            <option value="🥤">🥤 Bebida</option>
+                            <option value="🥤">🥤 Bebida / Coca-Cola (Vaso)</option>
+                            <option value="🍾">🍾 Botella de Gaseosa</option>
+                            <option value="🥫">🥫 Lata de Bebida / Gaseosa</option>
+                            <option value="💧">💧 Botella de Agua</option>
+                            <option value="🧃">🧃 Jugo / Cajita</option>
                             <option value="🧅">🧅 Aros de Cebolla</option>
                             <option value="🍕">🍕 Pizza</option>
                             <option value="🌮">🌮 Taco</option>
@@ -3164,7 +3216,11 @@ function App() {
                                   <option value="🍔">🍔 Hamburguesa</option>
                                   <option value="🧀">🧀 Queso / Cheeseburger</option>
                                   <option value="🍟">🍟 Papas Fritas</option>
-                                  <option value="🥤">🥤 Bebida</option>
+                                  <option value="🥤">🥤 Bebida / Coca-Cola (Vaso)</option>
+                                  <option value="🍾">🍾 Botella de Gaseosa</option>
+                                  <option value="🥫">🥫 Lata de Bebida / Gaseosa</option>
+                                  <option value="💧">💧 Botella de Agua</option>
+                                  <option value="🧃">🧃 Jugo / Cajita</option>
                                   <option value="🧅">🧅 Aros de Cebolla</option>
                                   <option value="🍕">🍕 Pizza</option>
                                   <option value="🌮">🌮 Taco</option>
@@ -3351,7 +3407,10 @@ function App() {
                               <option value="🍔">🍔 Hamburguesas</option>
                               <option value="🌭">🌭 Completos / Hot Dogs</option>
                               <option value="🍟">🍟 Acompañamientos / Papas</option>
-                              <option value="🥤">🥤 Bebidas / Bebestibles</option>
+                              <option value="🥤">🥤 Bebidas / Coca-Cola</option>
+                              <option value="🍾">🍾 Botellas de Gaseosa</option>
+                              <option value="🥫">🥫 Latas de Bebida</option>
+                              <option value="💧">💧 Botellas de Agua</option>
                               <option value="🍕">🍕 Pizzas</option>
                               <option value="🌮">🌮 Tacos</option>
                               <option value="🍦">🍦 Postres / Helados</option>
@@ -3708,7 +3767,10 @@ function App() {
                                   <option value="🏷️">🏷️ Oferta</option>
                                   <option value="🌭">🌭 Completo</option>
                                   <option value="🍟">🍟 Papas Fritas</option>
-                                  <option value="🥤">🥤 Bebida</option>
+                                  <option value="🥤">🥤 Bebida / Coca-Cola</option>
+                                  <option value="🍾">🍾 Botella de Gaseosa</option>
+                                  <option value="🥫">🥫 Lata de Bebida</option>
+                                  <option value="💧">💧 Botella de Agua</option>
                                 </select>
                               </div>
                             </div>
@@ -3812,7 +3874,10 @@ function App() {
                                   <option value="🍔">🍔 Hamburguesa</option>
                                   <option value="🌭">🌭 Completo</option>
                                   <option value="🍟">🍟 Papas Fritas</option>
-                                  <option value="🥤">🥤 Bebida</option>
+                                  <option value="🥤">🥤 Bebida / Coca-Cola</option>
+                                  <option value="🍾">🍾 Botella de Gaseosa</option>
+                                  <option value="🥫">🥫 Lata de Bebida</option>
+                                  <option value="💧">💧 Botella de Agua</option>
                                   <option value="🍕">🍕 Pizza</option>
                                   <option value="🍗">🍗 Pollo Frito</option>
                                   <option value="🥪">🥪 Sándwich</option>
@@ -3901,7 +3966,10 @@ function App() {
                                   <option value="🍔">🍔 Hamburguesa</option>
                                   <option value="🌭">🌭 Completo</option>
                                   <option value="🍟">🍟 Papas Fritas</option>
-                                  <option value="🥤">🥤 Bebida</option>
+                                  <option value="🥤">🥤 Bebida / Coca-Cola</option>
+                                  <option value="🍾">🍾 Botella de Gaseosa</option>
+                                  <option value="🥫">🥫 Lata de Bebida</option>
+                                  <option value="💧">💧 Botella de Agua</option>
                                   <option value="🍕">🍕 Pizza</option>
                                   <option value="🍗">🍗 Pollo Frito</option>
                                   <option value="🌮">🌮 Taco</option>
@@ -4316,7 +4384,8 @@ function App() {
                                 atendido_por: ped.atendido_por,
                                 nota: ped.nota,
                                 tipo_entrega: ped.tipo_entrega,
-                                tipo_transaccion: ped.tipo_transaccion
+                                tipo_transaccion: ped.tipo_transaccion,
+                                pago_mixto_detalle: ped.pago_mixto_detalle
                               })}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -4337,21 +4406,27 @@ function App() {
                                     ? 'rgba(59, 130, 246, 0.15)' 
                                     : ped.tipo_transaccion === 'Débito' 
                                       ? 'rgba(16, 185, 129, 0.15)' 
-                                      : 'rgba(234, 179, 8, 0.15)',
+                                      : ped.tipo_transaccion === 'Mixto'
+                                        ? 'rgba(139, 92, 246, 0.18)'
+                                        : 'rgba(234, 179, 8, 0.15)',
                                   border: ped.tipo_transaccion === 'Crédito' 
                                     ? '1px solid rgba(59, 130, 246, 0.3)' 
                                     : ped.tipo_transaccion === 'Débito' 
                                       ? '1px solid rgba(16, 185, 129, 0.3)' 
-                                      : '1px solid rgba(234, 179, 8, 0.3)',
+                                      : ped.tipo_transaccion === 'Mixto'
+                                        ? '1px solid rgba(139, 92, 246, 0.4)'
+                                        : '1px solid rgba(234, 179, 8, 0.3)',
                                   color: ped.tipo_transaccion === 'Crédito' 
                                     ? (isDark ? '#93c5fd' : '#1d4ed8') 
                                     : ped.tipo_transaccion === 'Débito' 
                                       ? (isDark ? '#a7f3d0' : '#047857') 
-                                      : (isDark ? '#fef08a' : '#b45309'),
+                                      : ped.tipo_transaccion === 'Mixto'
+                                        ? (isDark ? '#c4b5fd' : '#6d28d9')
+                                        : (isDark ? '#fef08a' : '#b45309'),
                                   fontSize: '0.75rem',
                                   padding: '0.15rem 0.5rem'
                                 }}>
-                                  {ped.tipo_transaccion || 'Efectivo'}
+                                  {ped.tipo_transaccion === 'Mixto' ? `🔀 Mixto ${ped.pago_mixto_detalle ? `(${ped.pago_mixto_detalle})` : ''}` : (ped.tipo_transaccion || 'Efectivo')}
                                 </span>
                                 <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: '600' }}>
                                   - {ped.cliente_nombre}
@@ -5196,29 +5271,142 @@ function App() {
                 </div>
                 <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Tipo de Transacción</label>
-                  <div className="delivery-selector-group" style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                      type="button"
-                      className={`delivery-option-btn ${tipoTransaccion === 'Efectivo' ? 'active' : ''}`}
-                      onClick={() => setTipoTransaccion('Efectivo')}
-                    >
-                      💵 Efectivo
-                    </button>
-                    <button
-                      type="button"
-                      className={`delivery-option-btn ${tipoTransaccion === 'Débito' ? 'active' : ''}`}
-                      onClick={() => setTipoTransaccion('Débito')}
-                    >
-                      💳 Débito
-                    </button>
-                    <button
-                      type="button"
-                      className={`delivery-option-btn ${tipoTransaccion === 'Crédito' ? 'active' : ''}`}
-                      onClick={() => setTipoTransaccion('Crédito')}
-                    >
-                      💳 Crédito
-                    </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                    {/* Fila Superior: 3 métodos individuales */}
+                    <div className="delivery-selector-group" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.4rem' }}>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoTransaccion === 'Efectivo' ? 'active' : ''}`}
+                        onClick={() => setTipoTransaccion('Efectivo')}
+                      >
+                        💵 Efectivo
+                      </button>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoTransaccion === 'Débito' ? 'active' : ''}`}
+                        onClick={() => setTipoTransaccion('Débito')}
+                      >
+                        💳 Débito
+                      </button>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoTransaccion === 'Crédito' ? 'active' : ''}`}
+                        onClick={() => setTipoTransaccion('Crédito')}
+                      >
+                        💳 Crédito
+                      </button>
+                    </div>
+
+                    {/* Fila Inferior: Pago Mixto centrado y compacto */}
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.1rem' }}>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoTransaccion === 'Mixto' ? 'active' : ''}`}
+                        onClick={() => setTipoTransaccion('Mixto')}
+                        style={{ padding: '0.45rem 1.25rem', fontSize: '0.85rem' }}
+                      >
+                        🔀 Pago Mixto
+                      </button>
+                    </div>
                   </div>
+
+                  {tipoTransaccion === 'Mixto' && (() => {
+                    const totalM = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+                    const efecM = parseFloat(montoEfectivoMixto) || 0;
+                    const debM = parseFloat(montoDebitoMixto) || 0;
+                    const credM = parseFloat(montoCreditoMixto) || 0;
+                    const sumaM = efecM + debM + credM;
+                    const diffM = totalM - sumaM;
+
+                    return (
+                      <div style={{
+                        marginTop: '0.85rem',
+                        padding: '0.85rem 1rem',
+                        borderRadius: '16px',
+                        background: 'var(--item-bg)',
+                        border: '1.5px solid var(--accent-primary)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.65rem'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                            🔀 Ingresa la división del pago:
+                          </span>
+                          <span style={{ fontSize: '0.85rem', fontWeight: '800', color: 'var(--accent-primary)' }}>
+                            Total: ${totalM.toLocaleString('es-CL')}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                          <div>
+                            <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.2rem' }}>
+                              💵 Efectivo ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              className="form-input"
+                              placeholder="0"
+                              value={montoEfectivoMixto}
+                              onChange={(e) => setMontoEfectivoMixto(e.target.value)}
+                              style={{ fontSize: '0.85rem', height: '36px', padding: '0 0.5rem', fontWeight: '700' }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.2rem' }}>
+                              💳 Débito ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              className="form-input"
+                              placeholder="0"
+                              value={montoDebitoMixto}
+                              onChange={(e) => setMontoDebitoMixto(e.target.value)}
+                              style={{ fontSize: '0.85rem', height: '36px', padding: '0 0.5rem', fontWeight: '700' }}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.2rem' }}>
+                              💳 Crédito ($)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              className="form-input"
+                              placeholder="0"
+                              value={montoCreditoMixto}
+                              onChange={(e) => setMontoCreditoMixto(e.target.value)}
+                              style={{ fontSize: '0.85rem', height: '36px', padding: '0 0.5rem', fontWeight: '700' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ 
+                          display: 'flex', 
+                          justify: 'space-between', 
+                          alignItems: 'center', 
+                          padding: '0.4rem 0.65rem', 
+                          borderRadius: '10px', 
+                          fontSize: '0.8rem', 
+                          fontWeight: '700',
+                          background: diffM === 0 ? 'rgba(16, 185, 129, 0.15)' : diffM > 0 ? 'rgba(234, 179, 8, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                          color: diffM === 0 ? 'var(--success)' : diffM > 0 ? '#d97706' : 'var(--error)',
+                          border: diffM === 0 ? '1px solid rgba(16, 185, 129, 0.35)' : diffM > 0 ? '1px solid rgba(234, 179, 8, 0.35)' : '1px solid rgba(239, 68, 68, 0.35)'
+                        }}>
+                          <span>
+                            Suma Asignada: ${sumaM.toLocaleString('es-CL')}
+                          </span>
+                          <span>
+                            {diffM === 0 ? '✅ Suma Exacta' : diffM > 0 ? `⚠️ Faltan $${diffM.toLocaleString('es-CL')}` : `❌ Excede en $${Math.abs(diffM).toLocaleString('es-CL')}`}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.35rem' }}>Nota para la Cocina (Opcional)</label>
@@ -5263,6 +5451,11 @@ function App() {
               <div style={{ marginTop: '0.5rem', fontWeight: 'bold', fontSize: '0.95rem', color: comandaData.tipo_entrega === 'Llevar' ? '#dc2626' : '#059669' }}>
                 {comandaData.tipo_entrega === 'Llevar' ? 'PARA LLEVAR' : 'PARA SERVIR'}
                 {comandaData.tipo_transaccion && ` | MÉT. PAGO: ${comandaData.tipo_transaccion.toUpperCase()}`}
+                {comandaData.tipo_transaccion === 'Mixto' && comandaData.pago_mixto_detalle && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600', marginTop: '0.15rem' }}>
+                    ({comandaData.pago_mixto_detalle})
+                  </div>
+                )}
               </div>
               <div className="comanda-date-time">
                 <span>Fecha: {new Date(comandaData.fecha_hora).toLocaleDateString('es-CL')}</span>
