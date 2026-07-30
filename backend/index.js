@@ -14,11 +14,12 @@ app.use(express.json()); // Permite procesar peticiones JSON
 // Asegurar columnas y tablas en la base de datos de manera automatizada
 (async () => {
   try {
-    // 1. Asegurar columna categoria en productos
+    // 1. Asegurar columna categoria y aplica_envase en productos
     await pool.query("ALTER TABLE productos ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'Otros'");
-    console.log("✅ Columna 'categoria' asegurada en la tabla productos.");
+    await pool.query("ALTER TABLE productos ADD COLUMN IF NOT EXISTS aplica_envase VARCHAR(20) DEFAULT 'heredar'");
+    console.log("✅ Columnas 'categoria' y 'aplica_envase' aseguradas en la tabla productos.");
 
-    // 2. Asegurar tabla categorias
+    // 2. Asegurar tabla categorias y cobra_envase
     await pool.query(`
       CREATE TABLE IF NOT EXISTS categorias (
         id SERIAL PRIMARY KEY,
@@ -27,6 +28,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
     `);
     await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🏷️'");
     await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS orden INT DEFAULT 0");
+    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS cobra_envase BOOLEAN DEFAULT TRUE");
     console.log("✅ Tabla 'categorias' asegurada.");
 
     // 3. Asegurar tabla pedidos
@@ -46,7 +48,9 @@ app.use(express.json()); // Permite procesar peticiones JSON
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_debito DECIMAL(10, 2) DEFAULT 0");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_credito DECIMAL(10, 2) DEFAULT 0");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pago_mixto_detalle TEXT");
-    console.log("✅ Tabla 'pedidos' asegurada (con columnas 'nota', 'tipo_entrega', 'tipo_transaccion', 'monto_efectivo', 'monto_debito', 'monto_credito', 'pago_mixto_detalle').");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cantidad_envases INT DEFAULT 0");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_envases DECIMAL(10, 2) DEFAULT 0");
+    console.log("✅ Tabla 'pedidos' asegurada (con columnas de transacciones y envases).");
 
     // 4. Asegurar tabla pedido_productos
     await pool.query(`
@@ -100,6 +104,8 @@ app.use(express.json()); // Permite procesar peticiones JSON
       )
     `);
     await pool.query("ALTER TABLE promociones ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🎁'");
+    await pool.query("ALTER TABLE promociones ADD COLUMN IF NOT EXISTS aplica_envase VARCHAR(20) DEFAULT 'no'");
+    await pool.query("ALTER TABLE promociones ADD COLUMN IF NOT EXISTS cantidad_envases INT DEFAULT 1");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS promocion_pasos (
         id SERIAL PRIMARY KEY,
@@ -126,18 +132,51 @@ app.use(express.json()); // Permite procesar peticiones JSON
     `);
     console.log("✅ Tablas de promociones ('promociones', 'promocion_productos_fijos', 'promocion_pasos', 'promocion_opciones') aseguradas.");
 
-    // 8. Asegurar tabla configuracion
+    // 8. Asegurar tabla configuracion y precio por defecto de envases
     await pool.query(`
       CREATE TABLE IF NOT EXISTS configuracion (
         clave VARCHAR(100) PRIMARY KEY,
         valor TEXT NOT NULL
       )
     `);
+    await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('precio_envase', '300') ON CONFLICT (clave) DO NOTHING");
     console.log("✅ Tabla 'configuracion' asegurada.");
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
 })();
+
+// Endpoints de Configuración
+app.get('/api/configuracion', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT clave, valor FROM configuracion');
+    const configObj = {};
+    result.rows.forEach(row => {
+      configObj[row.clave] = row.valor;
+    });
+    res.json({ success: true, configuracion: configObj });
+  } catch (err) {
+    console.error('Error en GET /api/configuracion:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener configuración.' });
+  }
+});
+
+app.put('/api/configuracion', async (req, res) => {
+  const { clave, valor } = req.body;
+  if (!clave) {
+    return res.status(400).json({ success: false, message: 'La clave de configuración es obligatoria.' });
+  }
+  try {
+    await pool.query(
+      'INSERT INTO configuracion (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor',
+      [clave, String(valor)]
+    );
+    res.json({ success: true, message: 'Configuración actualizada con éxito.' });
+  } catch (err) {
+    console.error('Error en PUT /api/configuracion:', err.message);
+    res.status(500).json({ success: false, message: 'Error al actualizar configuración.' });
+  }
+});
 
 // Endpoint de prueba
 app.get('/api/health', (req, res) => {
@@ -266,6 +305,7 @@ app.get('/api/productos', async (req, res) => {
         p.precio, 
         p.imagen, 
         p.categoria,
+        COALESCE(p.aplica_envase, 'heredar') AS aplica_envase,
         COALESCE(
           json_agg(
             json_build_object(
@@ -308,6 +348,8 @@ app.get('/api/promociones', async (req, res) => {
         pr.precio,
         pr.activo,
         pr.emoji,
+        COALESCE(pr.aplica_envase, 'no') AS aplica_envase,
+        COALESCE(pr.cantidad_envases, 1) AS cantidad_envases,
         COALESCE(
           (
             SELECT json_agg(
@@ -371,7 +413,7 @@ app.get('/api/promociones', async (req, res) => {
 
 // Endpoint de Crear Promoción
 app.post('/api/promociones', async (req, res) => {
-  const { nombre, precio, pasos, productos_fijos, emoji } = req.body;
+  const { nombre, precio, pasos, productos_fijos, emoji, aplica_envase, cantidad_envases } = req.body;
   if (!nombre || precio === undefined) {
     return res.status(400).json({ success: false, message: 'Nombre y precio son obligatorios.' });
   }
@@ -381,8 +423,8 @@ app.post('/api/promociones', async (req, res) => {
     await client.query('BEGIN');
     
     const promoRes = await client.query(
-      'INSERT INTO promociones (nombre, precio, emoji) VALUES ($1, $2, $3) RETURNING id',
-      [nombre.trim(), precio, emoji || '🎁']
+      'INSERT INTO promociones (nombre, precio, emoji, aplica_envase, cantidad_envases) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [nombre.trim(), precio, emoji || '🎁', aplica_envase || 'no', parseInt(cantidad_envases) || 1]
     );
     const promoId = promoRes.rows[0].id;
     
@@ -432,7 +474,7 @@ app.post('/api/promociones', async (req, res) => {
 // Endpoint de Editar Promoción
 app.put('/api/promociones/:id', async (req, res) => {
   const { id } = req.params;
-  const { nombre, precio, activo, pasos, productos_fijos, emoji } = req.body;
+  const { nombre, precio, activo, pasos, productos_fijos, emoji, aplica_envase, cantidad_envases } = req.body;
   
   if (!nombre || precio === undefined) {
     return res.status(400).json({ success: false, message: 'Nombre y precio son obligatorios.' });
@@ -443,8 +485,8 @@ app.put('/api/promociones/:id', async (req, res) => {
     await client.query('BEGIN');
     
     await client.query(
-      'UPDATE promociones SET nombre = $1, precio = $2, activo = $3, emoji = $4 WHERE id = $5',
-      [nombre.trim(), precio, activo !== false, emoji || '🎁', id]
+      'UPDATE promociones SET nombre = $1, precio = $2, activo = $3, emoji = $4, aplica_envase = $5, cantidad_envases = $6 WHERE id = $7',
+      [nombre.trim(), precio, activo !== false, emoji || '🎁', aplica_envase || 'no', parseInt(cantidad_envases) || 1, id]
     );
     
     // Borrar productos fijos antiguos e reinsertar
@@ -557,7 +599,7 @@ app.delete('/api/usuarios/:id', async (req, res) => {
 
 // Endpoint de Crear Producto (con transacción para asociar ingredientes)
 app.post('/api/productos', async (req, res) => {
-  const { nombre, precio, imagen, categoria, ingredientes } = req.body; // ingredientes: [{ ingrediente_id, cantidad }]
+  const { nombre, precio, imagen, categoria, ingredientes, aplica_envase } = req.body; // ingredientes: [{ ingrediente_id, cantidad }]
 
   // Validación básica
   if (!nombre || !precio) {
@@ -587,8 +629,8 @@ app.post('/api/productos', async (req, res) => {
 
     // Insertar el nuevo producto
     const result = await client.query(
-      'INSERT INTO productos (nombre, precio, imagen, categoria, activo) VALUES ($1, $2, $3, $4, true) RETURNING id, nombre',
-      [nombre.trim(), parseFloat(precio), imagen ? imagen.trim() : '🍔', categoria ? categoria.trim() : 'Otros']
+      'INSERT INTO productos (nombre, precio, imagen, categoria, activo, aplica_envase) VALUES ($1, $2, $3, $4, true, $5) RETURNING id, nombre',
+      [nombre.trim(), parseFloat(precio), imagen ? imagen.trim() : '🍔', categoria ? categoria.trim() : 'Otros', aplica_envase || 'heredar']
     );
     const nuevoProductoId = result.rows[0].id;
 
@@ -625,7 +667,7 @@ app.post('/api/productos', async (req, res) => {
 // Endpoint de Editar Producto (con transacción para actualizar ingredientes)
 app.put('/api/productos/:id', async (req, res) => {
   const { id } = req.params;
-  const { nombre, precio, imagen, categoria, ingredientes } = req.body;
+  const { nombre, precio, imagen, categoria, ingredientes, aplica_envase } = req.body;
 
   // Validación básica
   if (!nombre || !precio) {
@@ -656,8 +698,8 @@ app.put('/api/productos/:id', async (req, res) => {
 
     // Actualizar producto en la tabla productos
     await client.query(
-      'UPDATE productos SET nombre = $1, precio = $2, imagen = $3, categoria = $4 WHERE id = $5',
-      [nombreNuevo, parseFloat(precio), imagen ? imagen.trim() : '🍔', categoria ? categoria.trim() : 'Otros', id]
+      'UPDATE productos SET nombre = $1, precio = $2, imagen = $3, categoria = $4, aplica_envase = $5 WHERE id = $6',
+      [nombreNuevo, parseFloat(precio), imagen ? imagen.trim() : '🍔', categoria ? categoria.trim() : 'Otros', aplica_envase || 'heredar', id]
     );
 
     // Eliminar asociaciones de ingredientes previas
@@ -889,7 +931,7 @@ app.delete('/api/ingredientes/:id', async (req, res) => {
 // Endpoint de Obtener Categorías
 app.get('/api/categorias', async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, nombre, emoji, orden FROM categorias ORDER BY orden ASC, nombre ASC');
+    const result = await pool.query('SELECT id, nombre, emoji, orden, cobra_envase FROM categorias ORDER BY orden ASC, nombre ASC');
     res.json({
       success: true,
       categorias: result.rows
@@ -905,7 +947,7 @@ app.get('/api/categorias', async (req, res) => {
 
 // Endpoint de Registrar Categoría
 app.post('/api/categorias', async (req, res) => {
-  const { nombre, emoji } = req.body;
+  const { nombre, emoji, cobra_envase } = req.body;
   if (!nombre || !nombre.trim()) {
     return res.status(400).json({
       success: false,
@@ -923,8 +965,8 @@ app.post('/api/categorias', async (req, res) => {
     const maxRes = await pool.query('SELECT COALESCE(MAX(orden), 0) as max_order FROM categorias');
     const nextOrder = parseInt(maxRes.rows[0].max_order, 10) + 1;
     const result = await pool.query(
-      'INSERT INTO categorias (nombre, emoji, orden) VALUES ($1, $2, $3) RETURNING id, nombre, emoji, orden',
-      [nombre.trim(), emoji ? emoji.trim() : '🏷️', nextOrder]
+      'INSERT INTO categorias (nombre, emoji, orden, cobra_envase) VALUES ($1, $2, $3, $4) RETURNING id, nombre, emoji, orden, cobra_envase',
+      [nombre.trim(), emoji ? emoji.trim() : '🏷️', nextOrder, cobra_envase !== false]
     );
     res.status(201).json({
       success: true,
@@ -943,7 +985,7 @@ app.post('/api/categorias', async (req, res) => {
 // Endpoint de Editar Categoría
 app.put('/api/categorias/:id', async (req, res) => {
   const { id } = req.params;
-  const { nombre, emoji } = req.body;
+  const { nombre, emoji, cobra_envase } = req.body;
   if (!nombre || !nombre.trim()) {
     return res.status(400).json({
       success: false,
@@ -983,7 +1025,7 @@ app.put('/api/categorias/:id', async (req, res) => {
     await client.query('UPDATE productos SET categoria = $1 WHERE categoria = $2', [catNombreNuevo, catNombreAntiguo]);
 
     // Actualizar la categoría
-    await client.query('UPDATE categorias SET nombre = $1, emoji = $2 WHERE id = $3', [catNombreNuevo, emoji ? emoji.trim() : '🏷️', id]);
+    await client.query('UPDATE categorias SET nombre = $1, emoji = $2, cobra_envase = $3 WHERE id = $4', [catNombreNuevo, emoji ? emoji.trim() : '🏷️', cobra_envase !== false, id]);
 
     await client.query('COMMIT');
     res.json({
@@ -1090,7 +1132,9 @@ app.post('/api/pedidos', async (req, res) => {
     monto_efectivo,
     monto_debito,
     monto_credito,
-    pago_mixto_detalle
+    pago_mixto_detalle,
+    cantidad_envases,
+    monto_envases
   } = req.body;
 
   if (!cliente_nombre || !total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
@@ -1124,8 +1168,21 @@ app.post('/api/pedidos', async (req, res) => {
 
     // 1. Insertar la cabecera del pedido
     const orderRes = await client.query(
-      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, fecha_hora',
-      [cliente_nombre.trim(), total, atendido_por.trim(), nota ? nota.trim() : null, tipo_entrega || 'Servir', transTipo, finalEfec, finalDeb, finalCred, pago_mixto_detalle ? String(pago_mixto_detalle).trim() : null]
+      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle, cantidad_envases, monto_envases) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, fecha_hora',
+      [
+        cliente_nombre.trim(), 
+        total, 
+        atendido_por.trim(), 
+        nota ? nota.trim() : null, 
+        tipo_entrega || 'Servir', 
+        transTipo, 
+        finalEfec, 
+        finalDeb, 
+        finalCred, 
+        pago_mixto_detalle ? String(pago_mixto_detalle).trim() : null,
+        parseInt(cantidad_envases) || 0,
+        parseFloat(monto_envases) || 0
+      ]
     );
     const pedidoId = orderRes.rows[0].id;
     const fechaHora = orderRes.rows[0].fecha_hora;
@@ -1236,7 +1293,7 @@ app.get('/api/pedidos', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT p.id, p.cliente_nombre, p.total, p.fecha_hora, p.atendido_por, p.nota, p.tipo_entrega, p.tipo_transaccion,
-             p.monto_efectivo, p.monto_debito, p.monto_credito, p.pago_mixto_detalle,
+             p.monto_efectivo, p.monto_debito, p.monto_credito, p.pago_mixto_detalle, p.cantidad_envases, p.monto_envases,
              COALESCE(
                json_agg(
                  json_build_object(

@@ -328,6 +328,15 @@ function App() {
   const [promocionesError, setPromocionesError] = useState('');
   const [promoNombre, setPromoNombre] = useState('');
   const [promoEmoji, setPromoEmoji] = useState('🎁');
+
+  // Estados para configuración y cobro de envases para llevar
+  const [precioEnvase, setPrecioEnvase] = useState(300);
+  const [envasesCantidadOverride, setEnvasesCantidadOverride] = useState(null);
+  const [precioEnvaseOverride, setPrecioEnvaseOverride] = useState(null);
+  const [prodAplicaEnvase, setProdAplicaEnvase] = useState('heredar');
+  const [nuevaCatCobraEnvase, setNuevaCatCobraEnvase] = useState(true);
+  const [promoAplicaEnvase, setPromoAplicaEnvase] = useState('no');
+  const [promoCantidadEnvases, setPromoCantidadEnvases] = useState(1);
   const [promoPrecio, setPromoPrecio] = useState('');
   const [promoActivo, setPromoActivo] = useState(true);
   const [promoProductosFijos, setPromoProductosFijos] = useState([]);
@@ -345,6 +354,8 @@ function App() {
   const [catComboCantidad, setCatComboCantidad] = useState(2);
   const [catComboPrecioBase, setCatComboPrecioBase] = useState('');
   const [catComboEmoji, setCatComboEmoji] = useState('🍔');
+  const [selectedFixedProdId, setSelectedFixedProdId] = useState('');
+  const [selectedStepProds, setSelectedStepProds] = useState({});
 
   // Selección de promociones en el POS
   const [showPromoSelectorModal, setShowPromoSelectorModal] = useState(false);
@@ -495,6 +506,44 @@ function App() {
     setCurrentPromoStepIndex(0);
     setChosenPromoOpciones([]);
     setShowPromoSelectorModal(true);
+  };
+
+  // Función para calcular la cantidad y el costo total de envases para llevar
+  const calcularEnvases = (itemsPedido = pedido, entrega = tipoEntrega) => {
+    const unitPrice = parseFloat(precioEnvase) || 0;
+
+    if (entrega !== 'Llevar') {
+      return { cantidadTotal: 0, montoTotal: 0, unitPrice, cantidadAuto: 0 };
+    }
+
+    let cantidadAuto = 0;
+    for (const item of itemsPedido) {
+      if (item.promocion_id || (typeof item.id === 'string' && item.id.startsWith('promo-'))) {
+        const promoRef = promociones.find(p => p.id === item.promocion_id) || item;
+        const aplica = promoRef.aplica_envase || 'no';
+        if (aplica === 'combo') {
+          const cantPorCombo = parseInt(promoRef.cantidad_envases) || 1;
+          cantidadAuto += cantPorCombo * (parseInt(item.cantidad) || 1);
+        }
+      } else {
+        const prodRef = productos.find(p => p.id === item.id) || item;
+        const aplica = prodRef.aplica_envase || 'heredar';
+        if (aplica === 'si') {
+          cantidadAuto += parseInt(item.cantidad) || 1;
+        } else if (aplica === 'heredar' || !aplica) {
+          const catNombre = prodRef.categoria || item.categoria;
+          const catObj = listaCategorias.find(c => c.nombre === catNombre);
+          const cobraCat = catObj ? catObj.cobra_envase !== false : true;
+          if (cobraCat) {
+            cantidadAuto += parseInt(item.cantidad) || 1;
+          }
+        }
+      }
+    }
+
+    const cantidadTotal = envasesCantidadOverride !== null ? envasesCantidadOverride : cantidadAuto;
+    const montoTotal = cantidadTotal * unitPrice;
+    return { cantidadTotal, montoTotal, unitPrice, cantidadAuto };
   };
 
   const seleccionarOpcionPaso = (opcion) => {
@@ -782,7 +831,9 @@ function App() {
           activo: promoActivo,
           productos_fijos: finalFijos,
           pasos: finalPasos,
-          emoji: promoEmoji
+          emoji: promoEmoji,
+          aplica_envase: promoAplicaEnvase,
+          cantidad_envases: promoCantidadEnvases
         })
       });
       const data = await response.json();
@@ -792,6 +843,8 @@ function App() {
         setPromoPrecio('');
         setPromoEmoji('🎁');
         setPromoActivo(true);
+        setPromoAplicaEnvase('no');
+        setPromoCantidadEnvases(1);
         setPromoProductosFijos([]);
         setPromoPasos([]);
         setPackProductoId('');
@@ -816,6 +869,8 @@ function App() {
     setPromoPrecio(promo.precio);
     setPromoEmoji(promo.emoji || '🎁');
     setPromoActivo(promo.activo !== false);
+    setPromoAplicaEnvase(promo.aplica_envase || 'no');
+    setPromoCantidadEnvases(promo.cantidad_envases || 1);
     setPromoProductosFijos(promo.productos_fijos || []);
     setPromoPasos((promo.pasos || []).map(paso => ({
       ...paso,
@@ -832,6 +887,8 @@ function App() {
       }
     }
 
+    setSelectedFixedProdId('');
+    setSelectedStepProds({});
     setPromoError('');
     setPromoSuccess('');
     setPromocionesView('edit');
@@ -869,7 +926,7 @@ function App() {
       const response = await fetch('http://127.0.0.1:5000/api/configuracion');
       const data = await response.json();
       if (response.ok && data.success) {
-        const config = data.config || {};
+        const config = data.configuracion || data.config || {};
         setConfigEmailTo(config.REPORT_EMAIL_TO || '');
         setConfigEmailFrom(config.REPORT_EMAIL_FROM || 'inglesnaipe61@gmail.com');
         setConfigSmtpHost(config.SMTP_HOST || 'smtp.gmail.com');
@@ -877,6 +934,9 @@ function App() {
         setConfigSmtpSecure(config.SMTP_SECURE === 'true' || config.SMTP_SECURE === '1');
         setConfigSmtpUser(config.SMTP_USER || 'inglesnaipe61@gmail.com');
         setConfigSmtpPass(config.SMTP_PASS || '');
+        if (config.precio_envase) {
+          setPrecioEnvase(parseInt(config.precio_envase, 10) || 300);
+        }
       } else {
         setConfigError(data.message || 'Error al cargar la configuración.');
       }
@@ -898,6 +958,14 @@ function App() {
       const config = {
         REPORT_EMAIL_TO: configEmailTo
       };
+
+      await fetch('http://127.0.0.1:5000/api/configuracion', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ clave: 'precio_envase', valor: parseInt(precioEnvase, 10) || 0 })
+      });
 
       const response = await fetch('http://127.0.0.1:5000/api/configuracion', {
         method: 'POST',
@@ -1104,7 +1172,8 @@ function App() {
         },
         body: JSON.stringify({ 
           nombre: nuevaCategoriaNombre.trim(),
-          emoji: nuevaCategoriaEmoji.trim() || '🏷️'
+          emoji: nuevaCategoriaEmoji.trim() || '🏷️',
+          cobra_envase: nuevaCatCobraEnvase
         }),
       });
       const data = await response.json();
@@ -1112,6 +1181,7 @@ function App() {
         setCatSuccess(data.message);
         setNuevaCategoriaNombre('');
         setNuevaCategoriaEmoji('🏷️');
+        setNuevaCatCobraEnvase(true);
         cargarCategorias();
         setProdCategoria(data.categoria.nombre);
         setTimeout(() => {
@@ -1132,6 +1202,7 @@ function App() {
     setEditandoCatId(cat.id);
     setNuevaCategoriaNombre(cat.nombre);
     setNuevaCategoriaEmoji(cat.emoji || '🏷️');
+    setNuevaCatCobraEnvase(cat.cobra_envase !== false);
     setCatError('');
     setCatSuccess('');
   };
@@ -1140,6 +1211,7 @@ function App() {
     setEditandoCatId(null);
     setNuevaCategoriaNombre('');
     setNuevaCategoriaEmoji('🏷️');
+    setNuevaCatCobraEnvase(true);
     setCatError('');
     setCatSuccess('');
   };
@@ -1161,7 +1233,8 @@ function App() {
         },
         body: JSON.stringify({ 
           nombre: nuevaCategoriaNombre.trim(),
-          emoji: nuevaCategoriaEmoji.trim() || '🏷️'
+          emoji: nuevaCategoriaEmoji.trim() || '🏷️',
+          cobra_envase: nuevaCatCobraEnvase
         }),
       });
       const data = await response.json();
@@ -1169,6 +1242,7 @@ function App() {
         setCatSuccess(data.message);
         setNuevaCategoriaNombre('');
         setNuevaCategoriaEmoji('🏷️');
+        setNuevaCatCobraEnvase(true);
         setEditandoCatId(null);
         await cargarCategorias();
         await cargarProductos();
@@ -1283,6 +1357,7 @@ function App() {
           precio: parseFloat(prodPrecio),
           imagen: prodImagen.trim() || '🍔',
           categoria: prodCategoria.trim(),
+          aplica_envase: prodAplicaEnvase,
           ingredientes: ingredientesSeleccionados.map(i => ({
             ingrediente_id: i.ingrediente_id,
             cantidad: i.cantidad
@@ -1297,6 +1372,7 @@ function App() {
         setProdNombre('');
         setProdPrecio('');
         setProdImagen('🍔');
+        setProdAplicaEnvase('heredar');
         if (activeTab === 'categorias' && selectedCatForProducts) {
           setProdCategoria(selectedCatForProducts.nombre);
         } else {
@@ -1327,6 +1403,7 @@ function App() {
     setProdPrecio(prod.precio);
     setProdImagen(prod.imagen || '🍔');
     setProdCategoria(prod.categoria || 'Otros');
+    setProdAplicaEnvase(prod.aplica_envase || 'heredar');
     if (prod.ingredientes && Array.isArray(prod.ingredientes)) {
       setIngredientesSeleccionados(
         prod.ingredientes.map(ing => ({
@@ -1346,6 +1423,7 @@ function App() {
     setProdPrecio('');
     setProdImagen('🍔');
     setProdCategoria(listaCategorias[0]?.nombre || '');
+    setProdAplicaEnvase('heredar');
     setIngredientesSeleccionados([]);
     setCurrIngredienteId('');
     setCurrIngredienteCantidad('');
@@ -1799,7 +1877,6 @@ function App() {
     if (pedido.length === 0) return;
     setClienteNombre('');
     setPedidoNota('');
-    setTipoEntrega('Servir');
     setTipoTransaccion('Efectivo');
     setMontoEfectivoMixto('');
     setMontoDebitoMixto('');
@@ -1814,7 +1891,9 @@ function App() {
       return;
     }
 
-    const totalPedido = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+    const envasesInfo = calcularEnvases(pedido, tipoEntrega);
+    const subtotalProductos = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+    const totalPedido = subtotalProductos + envasesInfo.montoTotal;
     const atendidoPor = user ? user.nombre : 'Desconocido';
 
     let montoEfec = 0;
@@ -1870,7 +1949,9 @@ function App() {
       monto_efectivo: montoEfec,
       monto_debito: montoDeb,
       monto_credito: montoCred,
-      pago_mixto_detalle: detalleMixto
+      pago_mixto_detalle: detalleMixto,
+      cantidad_envases: envasesInfo.cantidadTotal,
+      monto_envases: envasesInfo.montoTotal
     };
 
     try {
@@ -1896,7 +1977,9 @@ function App() {
           monto_efectivo: payload.monto_efectivo,
           monto_debito: payload.monto_debito,
           monto_credito: payload.monto_credito,
-          pago_mixto_detalle: payload.pago_mixto_detalle
+          pago_mixto_detalle: payload.pago_mixto_detalle,
+          cantidad_envases: envasesInfo.cantidadTotal,
+          monto_envases: envasesInfo.montoTotal
         };
         setComandaData(newComanda);
 
@@ -1906,6 +1989,8 @@ function App() {
         }
 
         setPedido([]);
+        setEnvasesCantidadOverride(null);
+        setPrecioEnvaseOverride(null);
         setClienteNombre('');
         setPedidoNota('');
         setTipoEntrega('Servir');
@@ -2439,7 +2524,29 @@ function App() {
 
                 {/* Columna Derecha: Ticket de Pedido */}
                 <div className="order-section">
-                  <h3 className="section-title">📝 Detalle del Pedido</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <h3 className="section-title" style={{ margin: 0 }}>📝 Detalle del Pedido</h3>
+                    
+                    {/* Selector Servir / Llevar */}
+                    <div className="delivery-selector-group" style={{ margin: 0, minWidth: '210px' }}>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoEntrega === 'Servir' ? 'active' : ''}`}
+                        onClick={() => setTipoEntrega('Servir')}
+                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem', fontWeight: 'bold' }}
+                      >
+                        🍽️ Servir
+                      </button>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoEntrega === 'Llevar' ? 'active' : ''}`}
+                        onClick={() => setTipoEntrega('Llevar')}
+                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem', fontWeight: 'bold' }}
+                      >
+                        🛍️ Llevar
+                      </button>
+                    </div>
+                  </div>
                   
                   <div className="order-ticket">
                     {pedido.length === 0 ? (
@@ -2516,16 +2623,93 @@ function App() {
                         </div>
 
                         <div className="order-summary">
-                          <div className="total-row">
-                            <span>Total:</span>
-                            <span className="total-amount">
-                              ${pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                            </span>
-                          </div>
+                          {(() => {
+                            const envasesInfo = calcularEnvases(pedido, tipoEntrega);
+                            const subtotalProd = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+                            const grandTotal = subtotalProd + envasesInfo.montoTotal;
+
+                            return (
+                              <>
+                                {tipoEntrega === 'Llevar' && (
+                                  <div style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.4rem',
+                                    padding: '0.6rem 0.75rem',
+                                    background: 'rgba(234, 88, 12, 0.08)',
+                                    border: '1px dashed var(--accent-primary)',
+                                    borderRadius: '10px',
+                                    marginBottom: '0.75rem'
+                                  }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                        <span>📦</span>
+                                        <span>Envases para llevar</span>
+                                        <span style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-secondary)' }}>
+                                          (${precioEnvase} c/u)
+                                        </span>
+                                      </span>
+                                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--accent-primary)' }}>
+                                        +${envasesInfo.montoTotal.toLocaleString('es-CL')}
+                                      </span>
+                                    </div>
+
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.15rem' }}>
+                                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                                        Cantidad de envases:
+                                      </span>
+
+                                      {/* Controles + / - de cantidad de envases */}
+                                      <div className="qty-controls" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                        <button
+                                          type="button"
+                                          className="btn-qty"
+                                          style={{ width: '26px', height: '26px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                          onClick={() => {
+                                            const currentCant = envasesInfo.cantidadTotal;
+                                            setEnvasesCantidadOverride(Math.max(0, currentCant - 1));
+                                          }}
+                                        >
+                                          -
+                                        </button>
+                                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', minWidth: '20px', textAlign: 'center', color: 'var(--text-primary)' }}>
+                                          {envasesInfo.cantidadTotal}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className="btn-qty"
+                                          style={{ width: '26px', height: '26px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                          onClick={() => {
+                                            const currentCant = envasesInfo.cantidadTotal;
+                                            setEnvasesCantidadOverride(currentCant + 1);
+                                          }}
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                                <div className="total-row">
+                                  <span>Total:</span>
+                                  <span className="total-amount">
+                                    ${grandTotal.toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                  </span>
+                                </div>
+                              </>
+                            );
+                          })()}
                           <button onClick={handleConfirmarPedido} className="btn-primary btn-checkout">
                             Confirmar Pedido
                           </button>
-                          <button onClick={() => setPedido([])} className="btn-secondary btn-clear-order">
+                          <button
+                            onClick={() => {
+                              setPedido([]);
+                              setEnvasesCantidadOverride(null);
+                              setPrecioEnvaseOverride(null);
+                            }}
+                            className="btn-secondary btn-clear-order"
+                          >
                             Limpiar Pedido
                           </button>
                         </div>
@@ -2795,6 +2979,22 @@ function App() {
                                 {cat.emoji || '🏷️'} {cat.nombre}
                               </option>
                             ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="form-group">
+                        <label className="form-label">Cobro de Envase (Para Llevar)</label>
+                        <div className="input-wrapper">
+                          <select
+                            className="form-input form-select"
+                            value={prodAplicaEnvase}
+                            onChange={(e) => setProdAplicaEnvase(e.target.value)}
+                            disabled={prodLoading}
+                          >
+                            <option value="heredar">⚙️ Heredar de la Categoría</option>
+                            <option value="si">✅ Sí cobrar envase (+1 envase)</option>
+                            <option value="no">🚫 No cobrar envase (Exento)</option>
                           </select>
                         </div>
                       </div>
@@ -3423,6 +3623,18 @@ function App() {
                           </div>
                         </div>
 
+                        <div className="form-group" style={{ marginTop: '1rem' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: '600' }}>
+                            <input
+                              type="checkbox"
+                              checked={nuevaCatCobraEnvase}
+                              onChange={(e) => setNuevaCatCobraEnvase(e.target.checked)}
+                              style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+                            />
+                            <span>📦 Cobrar envase para llevar por defecto</span>
+                          </label>
+                        </div>
+
                         <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
                           {editandoCatId ? (
                             <>
@@ -3453,6 +3665,36 @@ function App() {
                               Crear Categoría
                             </button>
                           )}
+                        </div>
+
+                        {/* Ajuste Rápido del Precio Global de Envase */}
+                        <div style={{ marginTop: '1.5rem', background: 'rgba(234, 88, 12, 0.08)', border: '1px dashed var(--accent-primary)', padding: '1rem', borderRadius: '12px' }}>
+                          <label className="form-label" style={{ marginBottom: '0.4rem', fontWeight: '700', fontSize: '0.85rem', color: 'var(--text-primary)' }}>📦 Precio Global del Envase (Para Llevar)</label>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem', alignItems: 'center' }}>
+                            <div className="input-wrapper" style={{ margin: 0, position: 'relative' }}>
+                              <input
+                                type="number"
+                                min="0"
+                                className="form-input"
+                                style={{ height: '38px', fontSize: '0.95rem', paddingLeft: '2.2rem', paddingRight: '0.75rem', width: '100%', boxSizing: 'border-box' }}
+                                value={precioEnvase}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setPrecioEnvase(val === '' ? '' : parseInt(val, 10) || 0);
+                                }}
+                                onBlur={() => setPrecioEnvase(parseInt(precioEnvase, 10) || 0)}
+                              />
+                              <span className="input-icon" style={{ left: '0.75rem' }}>💲</span>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn-primary"
+                              style={{ height: '38px', padding: '0 1rem', fontSize: '0.82rem', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
+                              onClick={guardarConfiguracion}
+                            >
+                              💾 Guardar Precio
+                            </button>
+                          </div>
                         </div>
                       </form>
                     </div>
@@ -4099,6 +4341,33 @@ function App() {
                             </div>
                           </>
                         )}
+
+                        <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.85rem', borderRadius: '12px', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                          <label className="form-label" style={{ marginBottom: 0, fontWeight: '700' }}>📦 Cobro de Envase para Llevar</label>
+                          <div style={{ display: 'grid', gridTemplateColumns: promoAplicaEnvase === 'combo' ? '1.5fr 1fr' : '1fr', gap: '0.75rem', alignItems: 'center' }}>
+                            <select
+                              className="form-input form-select"
+                              value={promoAplicaEnvase}
+                              onChange={(e) => setPromoAplicaEnvase(e.target.value)}
+                            >
+                              <option value="no">🚫 No cobrar envase (Exento)</option>
+                              <option value="combo">✅ Cobrar envase por promoción</option>
+                            </select>
+                            {promoAplicaEnvase === 'combo' && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Cant. Envases:</label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  className="form-input"
+                                  value={promoCantidadEnvases}
+                                  onChange={(e) => setPromoCantidadEnvases(parseInt(e.target.value) || 1)}
+                                  style={{ textAlign: 'center', height: '38px', fontSize: '0.85rem' }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
 
                         <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <input
@@ -4883,8 +5152,45 @@ function App() {
                         </div>
                       )}
 
+                      {/* Configuración de Precio de Envase */}
+                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          📦 Precio del Envase para Llevar
+                        </h4>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
+                          Establece el precio unitario del envase ($) que se calculará en los pedidos Para Llevar.
+                        </p>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem', alignItems: 'center' }}>
+                          <div className="input-wrapper" style={{ margin: 0, position: 'relative' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              className="form-input"
+                              placeholder="300"
+                              value={precioEnvase}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPrecioEnvase(val === '' ? '' : parseInt(val, 10) || 0);
+                              }}
+                              onBlur={() => setPrecioEnvase(parseInt(precioEnvase, 10) || 0)}
+                              style={{ height: '38px', fontSize: '0.95rem', paddingLeft: '2.2rem', paddingRight: '0.75rem', width: '100%', boxSizing: 'border-box', color: 'var(--text-primary)' }}
+                            />
+                            <span className="input-icon" style={{ left: '0.75rem' }}>💲</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            style={{ height: '38px', padding: '0 1rem', fontSize: '0.85rem', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
+                            onClick={guardarConfiguracion}
+                          >
+                            💾 Guardar Precio
+                          </button>
+                        </div>
+                      </div>
+
                       {/* Configuración de Correo de Recepción */}
-                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)', marginTop: '1rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
                         <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           📬 Correo de Recepción de Reportes
                         </h4>
@@ -5250,25 +5556,7 @@ function App() {
                     required
                   />
                 </div>
-                <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
-                  <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Tipo de Entrega</label>
-                  <div className="delivery-selector-group">
-                    <button
-                      type="button"
-                      className={`delivery-option-btn ${tipoEntrega === 'Servir' ? 'active' : ''}`}
-                      onClick={() => setTipoEntrega('Servir')}
-                    >
-                      Para Servir
-                    </button>
-                    <button
-                      type="button"
-                      className={`delivery-option-btn ${tipoEntrega === 'Llevar' ? 'active' : ''}`}
-                      onClick={() => setTipoEntrega('Llevar')}
-                    >
-                      Para Llevar
-                    </button>
-                  </div>
-                </div>
+
                 <div className="form-group" style={{ marginTop: '1.25rem', marginBottom: 0 }}>
                   <label className="form-label" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Tipo de Transacción</label>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
@@ -5311,7 +5599,8 @@ function App() {
                   </div>
 
                   {tipoTransaccion === 'Mixto' && (() => {
-                    const totalM = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+                    const envasesInfo = calcularEnvases(pedido, tipoEntrega);
+                    const totalM = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0) + envasesInfo.montoTotal;
                     const efecM = parseFloat(montoEfectivoMixto) || 0;
                     const debM = parseFloat(montoDebitoMixto) || 0;
                     const credM = parseFloat(montoCreditoMixto) || 0;
@@ -5419,6 +5708,41 @@ function App() {
                     style={{ resize: 'none', height: 'auto', paddingTop: '0.5rem', fontFamily: 'inherit' }}
                   />
                 </div>
+
+                {/* Total del Pedido elegante */}
+                {(() => {
+                  const envasesInfo = calcularEnvases(pedido, tipoEntrega);
+                  const subtotalProd = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+                  const grandTotal = subtotalProd + envasesInfo.montoTotal;
+
+                  return (
+                    <div style={{
+                      marginTop: '1.5rem',
+                      marginBottom: '1.25rem',
+                      paddingTop: '1rem',
+                      borderTop: '1px solid var(--glass-border)',
+                      display: 'flex',
+                      justify: 'space-between',
+                      alignItems: 'center',
+                      width: '100%',
+                      boxSizing: 'border-box'
+                    }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, paddingRight: '1rem' }}>
+                        <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', fontWeight: '700' }}>
+                          Total a Pagar
+                        </span>
+                        {tipoEntrega === 'Llevar' && envasesInfo.montoTotal > 0 && (
+                          <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)', fontWeight: '500', marginTop: '0.2rem' }}>
+                            (Incluye +${envasesInfo.montoTotal.toLocaleString('es-CL')} de envases)
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '1.65rem', fontWeight: '800', color: 'var(--accent-primary)', letterSpacing: '-0.5px', whiteSpace: 'nowrap' }}>
+                        ${grandTotal.toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
               <div className="custom-modal-actions">
                 <button
@@ -5519,6 +5843,18 @@ function App() {
               <div className="comanda-attendant">
                 Fue atendido por {comandaData.atendido_por}
               </div>
+              {comandaData.tipo_entrega === 'Llevar' && comandaData.cantidad_envases > 0 && (
+                <div style={{
+                  textAlign: 'right',
+                  fontSize: '0.78rem',
+                  fontWeight: '600',
+                  color: 'var(--ticket-text-secondary, #666)',
+                  marginTop: '0.25rem',
+                  marginBottom: '0.15rem'
+                }}>
+                  📦 Envases p/llevar: {comandaData.cantidad_envases} (${parseFloat(comandaData.monto_envases || 0).toLocaleString('es-CL')})
+                </div>
+              )}
               <div className="comanda-total-row">
                 <span className="comanda-total-label">TOTAL:</span>
                 <span className="comanda-total-value">
