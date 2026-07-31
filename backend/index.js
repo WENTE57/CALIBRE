@@ -63,7 +63,9 @@ app.use(express.json()); // Permite procesar peticiones JSON
         precio_unitario DECIMAL(10, 2) NOT NULL
       )
     `);
-    console.log("✅ Tabla 'pedido_productos' asegurada.");
+    await pool.query("ALTER TABLE pedido_productos ADD COLUMN IF NOT EXISTS promocion_id INT");
+    await pool.query("ALTER TABLE pedido_productos ADD COLUMN IF NOT EXISTS productos_incluidos JSONB");
+    console.log("✅ Tabla 'pedido_productos' asegurada (con promocion_id y productos_incluidos).");
 
     // 5. Asegurar tipo decimal para stock en ingredientes
     await pool.query(`
@@ -236,6 +238,47 @@ app.post('/api/login', async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Error interno del servidor al procesar el login.' 
+    });
+  }
+});
+
+// Endpoint de Shortcut para ingresar al primer usuario administrador (A+P+L+T)
+app.post('/api/login/admin-first', async (req, res) => {
+  try {
+    // Buscar el primer usuario cuyo cargo sea Administrador
+    let result = await pool.query(
+      "SELECT id, nombre, cargo FROM usuarios WHERE LOWER(cargo) = 'administrador' ORDER BY id ASC LIMIT 1"
+    );
+
+    if (result.rows.length === 0) {
+      // Si no hay administradores explícitos, tomar el primer usuario de la tabla
+      result = await pool.query(
+        "SELECT id, nombre, cargo FROM usuarios ORDER BY id ASC LIMIT 1"
+      );
+    }
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No existen usuarios en la base de datos.'
+      });
+    }
+
+    const adminUser = result.rows[0];
+    res.json({
+      success: true,
+      message: `Inicio de sesión automático como ${adminUser.nombre}.`,
+      user: {
+        id: adminUser.id,
+        nombre: adminUser.nombre,
+        cargo: adminUser.cargo
+      }
+    });
+  } catch (err) {
+    console.error('Error en /api/login/admin-first:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error interno al buscar el usuario administrador.'
     });
   }
 });
@@ -1194,15 +1237,52 @@ app.post('/api/pedidos', async (req, res) => {
       const isIntegerId = (typeof rawId === 'number' && Number.isInteger(rawId)) ||
                         (typeof rawId === 'string' && /^\d+$/.test(rawId));
       const validProductId = isIntegerId ? parseInt(rawId, 10) : null;
+      const isPromo = !!(item.promocion_id || (typeof rawId === 'string' && rawId.startsWith('promo-')));
+      const promoIdVal = item.promocion_id ? parseInt(item.promocion_id, 10) : (typeof rawId === 'string' && rawId.startsWith('promo-') ? parseInt(rawId.split('-')[1], 10) : null);
+
+      let prodsIncluidos = null;
+      if (isPromo) {
+        prodsIncluidos = [];
+        let fijos = item.productos_fijos;
+        if ((!fijos || !Array.isArray(fijos) || fijos.length === 0) && promoIdVal) {
+          const fijosRes = await client.query(
+            'SELECT pf.producto_id, pf.cantidad, p.nombre as nombre_producto FROM promocion_productos_fijos pf JOIN productos p ON pf.producto_id = p.id WHERE pf.promocion_id = $1',
+            [promoIdVal]
+          );
+          fijos = fijosRes.rows;
+        }
+        if (fijos && Array.isArray(fijos)) {
+          for (const prodFijo of fijos) {
+            let nom = prodFijo.nombre_producto || prodFijo.nombre;
+            if (!nom && prodFijo.producto_id) {
+              const pRes = await client.query('SELECT nombre FROM productos WHERE id = $1', [prodFijo.producto_id]);
+              if (pRes.rows.length > 0) nom = pRes.rows[0].nombre;
+            }
+            if (nom) {
+              const cFija = (parseInt(prodFijo.cantidad) || 1) * item.cantidad;
+              prodsIncluidos.push({ producto_id: prodFijo.producto_id, nombre_producto: nom, cantidad: cFija });
+            }
+          }
+        }
+        if (item.opciones_elegidas && Array.isArray(item.opciones_elegidas)) {
+          for (const opcion of item.opciones_elegidas) {
+            let nom = opcion.nombre_producto;
+            if (!nom && opcion.producto_id) {
+              const pRes = await client.query('SELECT nombre FROM productos WHERE id = $1', [opcion.producto_id]);
+              if (pRes.rows.length > 0) nom = pRes.rows[0].nombre;
+            }
+            if (nom) {
+              prodsIncluidos.push({ producto_id: opcion.producto_id, nombre_producto: nom, cantidad: item.cantidad });
+            }
+          }
+        }
+      }
 
       // Registrar el producto en el detalle del pedido
       await client.query(
-        'INSERT INTO pedido_productos (pedido_id, producto_id, nombre_producto, cantidad, precio_unitario) VALUES ($1, $2, $3, $4, $5)',
-        [pedidoId, validProductId, item.nombre, item.cantidad, item.precio]
+        'INSERT INTO pedido_productos (pedido_id, producto_id, nombre_producto, cantidad, precio_unitario, promocion_id, productos_incluidos) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [pedidoId, validProductId, item.nombre, item.cantidad, item.precio, promoIdVal, prodsIncluidos ? JSON.stringify(prodsIncluidos) : null]
       );
-
-      // Descontar stock si el producto es una promoción (productos fijos u opciones elegidas) o producto normal
-      const isPromo = item.promocion_id || (typeof rawId === 'string' && rawId.startsWith('promo-'));
 
       if (isPromo) {
         // 1. Descontar ingredientes de Productos Fijos de la promoción
@@ -1366,19 +1446,173 @@ app.get('/api/informes/cierre', async (req, res) => {
       ORDER BY cantidad_vendida DESC
     `, [fecha]);
 
-    // Consultar el gasto teórico de ingredientes (materia prima) basado en las recetas de los productos vendidos
-    const ingredientesResult = await pool.query(`
+    // Consultar total de envases vendidos en el día
+    const envasesResult = await pool.query(`
       SELECT 
-        i.nombre as ingrediente_nombre,
-        SUM(pp.cantidad * pi.cantidad)::FLOAT as cantidad_gastada
+        COALESCE(SUM(cantidad_envases), 0)::INTEGER as cantidad,
+        COALESCE(SUM(monto_envases), 0)::INTEGER as total_pesos
+      FROM pedidos
+      WHERE DATE(fecha_hora) = $1
+    `, [fecha]);
+
+    const envases_vendidos = envasesResult.rows[0] || { cantidad: 0, total_pesos: 0 };
+
+    // Consultar desglose de productos individuales (fijos y de pasos) incluidos en promociones vendidas en el día
+    const promoProdsQuery = await pool.query(`
+      SELECT 
+        pp.promocion_id,
+        pp.nombre_producto as promo_nombre,
+        pp.cantidad as promo_cantidad,
+        pp.productos_incluidos
       FROM pedidos p
       JOIN pedido_productos pp ON p.id = pp.pedido_id
-      JOIN producto_ingredientes pi ON pp.producto_id = pi.producto_id
-      JOIN ingredientes i ON pi.ingrediente_id = i.id
       WHERE DATE(p.fecha_hora) = $1
-      GROUP BY i.id, i.nombre
-      ORDER BY cantidad_gastada DESC
+        AND (
+          pp.promocion_id IS NOT NULL 
+          OR pp.productos_incluidos IS NOT NULL 
+          OR pp.nombre_producto IN (SELECT nombre FROM promociones)
+        )
     `, [fecha]);
+
+    const mapaProdsPromo = {};
+
+    for (const row of promoProdsQuery.rows) {
+      let incluidos = row.productos_incluidos;
+      if (typeof incluidos === 'string') {
+        try { incluidos = JSON.parse(incluidos); } catch(e) { incluidos = null; }
+      }
+
+      if (Array.isArray(incluidos) && incluidos.length > 0) {
+        for (const item of incluidos) {
+          const nom = item.nombre_producto;
+          const cant = parseInt(item.cantidad) || 1;
+          if (nom) {
+            mapaProdsPromo[nom] = (mapaProdsPromo[nom] || 0) + cant;
+          }
+        }
+      } else {
+        const promoId = row.promocion_id;
+        const promoNombre = row.promo_nombre;
+        const qty = parseInt(row.promo_cantidad) || 1;
+
+        const promoRes = await pool.query(
+          'SELECT id FROM promociones WHERE id = $1 OR nombre = $2 LIMIT 1',
+          [promoId || 0, promoNombre]
+        );
+
+        if (promoRes.rows.length > 0) {
+          const pid = promoRes.rows[0].id;
+          const fijosRes = await pool.query(
+            'SELECT p.nombre, pf.cantidad FROM promocion_productos_fijos pf JOIN productos p ON pf.producto_id = p.id WHERE pf.promocion_id = $1',
+            [pid]
+          );
+          for (const f of fijosRes.rows) {
+            const nom = f.nombre;
+            const cant = (parseInt(f.cantidad) || 1) * qty;
+            mapaProdsPromo[nom] = (mapaProdsPromo[nom] || 0) + cant;
+          }
+
+          const pasosRes = await pool.query(
+            'SELECT pa.id FROM promocion_pasos pa WHERE pa.promocion_id = $1',
+            [pid]
+          );
+          for (const paso of pasosRes.rows) {
+            const opcRes = await pool.query(
+              'SELECT p.nombre FROM promocion_opciones op JOIN productos p ON op.producto_id = p.id WHERE op.promocion_paso_id = $1 LIMIT 1',
+              [paso.id]
+            );
+            if (opcRes.rows.length > 0) {
+              const nom = opcRes.rows[0].nombre;
+              mapaProdsPromo[nom] = (mapaProdsPromo[nom] || 0) + qty;
+            }
+          }
+        }
+      }
+    }
+
+    const productos_promociones = Object.keys(mapaProdsPromo).map(nom => ({
+      nombre_producto: nom,
+      cantidad_total: mapaProdsPromo[nom]
+    })).sort((a, b) => b.cantidad_total - a.cantidad_total);
+
+    // Obtener la lista de nombres de todas las promociones para distinguirlas de productos normales
+    const promosListRes = await pool.query('SELECT nombre FROM promociones');
+    const promosNombresSet = new Set(promosListRes.rows.map(r => r.nombre));
+
+    const mapaUnificados = {};
+
+    // 1. Sumar productos individuales vendidos directamente
+    for (const p of productosResult.rows) {
+      const nom = p.nombre_producto;
+      const cant = parseInt(p.cantidad_vendida) || 0;
+      if (!promosNombresSet.has(nom)) {
+        if (!mapaUnificados[nom]) {
+          mapaUnificados[nom] = { nombre_producto: nom, cantidad_directa: 0, cantidad_promo: 0, cantidad_total: 0 };
+        }
+        mapaUnificados[nom].cantidad_directa += cant;
+        mapaUnificados[nom].cantidad_total += cant;
+      }
+    }
+
+    // 2. Sumar productos provenientes de promociones
+    for (const p of productos_promociones) {
+      const nom = p.nombre_producto;
+      const cant = parseInt(p.cantidad_total) || 0;
+      if (!mapaUnificados[nom]) {
+        mapaUnificados[nom] = { nombre_producto: nom, cantidad_directa: 0, cantidad_promo: 0, cantidad_total: 0 };
+      }
+      mapaUnificados[nom].cantidad_promo += cant;
+      mapaUnificados[nom].cantidad_total += cant;
+    }
+
+    // 3. Incluir envases para llevar si existen
+    if (envases_vendidos && envases_vendidos.cantidad > 0) {
+      mapaUnificados['Envases para llevar'] = {
+        nombre_producto: 'Envases para llevar',
+        cantidad_directa: envases_vendidos.cantidad,
+        cantidad_promo: 0,
+        cantidad_total: envases_vendidos.cantidad
+      };
+    }
+
+    const productos_unificados = Object.values(mapaUnificados)
+      .sort((a, b) => b.cantidad_total - a.cantidad_total);
+
+    // Consultar el gasto real de ingredientes (materia prima) basado en la totalidad de productos vendidos (directos + promociones)
+    const mapaIngredientesGastados = {};
+
+    for (const prod of productos_unificados) {
+      const cantTotal = parseInt(prod.cantidad_total) || 0;
+      if (cantTotal <= 0) continue;
+
+      const recipeRes = await pool.query(`
+        SELECT 
+          i.id as ingrediente_id,
+          i.nombre as ingrediente_nombre,
+          pi.cantidad as cantidad_por_unidad
+        FROM productos pr
+        JOIN producto_ingredientes pi ON pr.id = pi.producto_id
+        JOIN ingredientes i ON pi.ingrediente_id = i.id
+        WHERE pr.nombre = $1
+      `, [prod.nombre_producto]);
+
+      for (const ing of recipeRes.rows) {
+        const ingId = ing.ingrediente_id;
+        const ingNombre = ing.ingrediente_nombre;
+        const gastado = parseFloat(ing.cantidad_por_unidad) * cantTotal;
+
+        if (!mapaIngredientesGastados[ingId]) {
+          mapaIngredientesGastados[ingId] = {
+            ingrediente_nombre: ingNombre,
+            cantidad_gastada: 0
+          };
+        }
+        mapaIngredientesGastados[ingId].cantidad_gastada += gastado;
+      }
+    }
+
+    const ingredientes_gastados = Object.values(mapaIngredientesGastados)
+      .sort((a, b) => b.cantidad_gastada - a.cantidad_gastada);
 
     res.json({
       success: true,
@@ -1392,7 +1626,10 @@ app.get('/api/informes/cierre', async (req, res) => {
         total_credito,
         total_tarjeta,
         productos_vendidos: productosResult.rows,
-        ingredientes_gastados: ingredientesResult.rows
+        envases_vendidos,
+        productos_promociones,
+        productos_unificados,
+        ingredientes_gastados
       }
     });
   } catch (err) {

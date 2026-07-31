@@ -2043,6 +2043,76 @@ function App() {
     }
   };
 
+  // Shortcut A+P+L+T para ingresar como el primer usuario Administrador desde la pantalla de Login
+  const keysPressed = useRef(new Set());
+  const typedSequence = useRef('');
+
+  const handleAdminShortcutLogin = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/login/admin-first', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setUser(data.user);
+        sessionStorage.setItem('calibre_session', JSON.stringify(data.user));
+      } else {
+        setError(data.message || 'No se encontró un usuario administrador.');
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Error al ingresar con el atajo de administrador.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) return; // Solo escuchar cuando estemos en la pantalla de Login
+
+    const handleKeyDown = (e) => {
+      const key = e.key.toLowerCase();
+      keysPressed.current.add(key);
+
+      // 1. Detectar si las teclas A, P, L, T están presionadas simultáneamente
+      const hasA = keysPressed.current.has('a');
+      const hasP = keysPressed.current.has('p');
+      const hasL = keysPressed.current.has('l');
+      const hasT = keysPressed.current.has('t');
+
+      // 2. Detectar si fueron tipeadas secuencialmente (aplt)
+      if (key.length === 1 && /[a-z]/i.test(key)) {
+        typedSequence.current = (typedSequence.current + key).slice(-4);
+      }
+
+      if ((hasA && hasP && hasL && hasT) || typedSequence.current === 'aplt') {
+        keysPressed.current.clear();
+        typedSequence.current = '';
+        handleAdminShortcutLogin();
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      const key = e.key.toLowerCase();
+      keysPressed.current.delete(key);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [user]);
+
     const handleLogout = () => {
     setUser(null);
     sessionStorage.removeItem('calibre_session');
@@ -4744,6 +4814,9 @@ function App() {
                                 total_credito: cierreData.total_credito,
                                 total_tarjeta: cierreData.total_tarjeta,
                                 productos_vendidos: cierreData.productos_vendidos,
+                                envases_vendidos: cierreData.envases_vendidos,
+                                productos_promociones: cierreData.productos_promociones,
+                                productos_unificados: cierreData.productos_unificados,
                                 ingredientes_gastados: cierreData.ingredientes_gastados,
                                 has_arqueo: !!cierreRegistradoData,
                                 cargado_por: cierreRegistradoData ? cierreRegistradoData.cargado_por : '',
@@ -4828,12 +4901,42 @@ function App() {
 
                           {/* Desglose de Ventas y Consumo de Materia Prima (Junto al informe de ventas) */}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                            {/* Productos Vendidos */}
+                            {/* LISTA UNIFICADA DE PRODUCTOS VENDIDOS (Unidades Totales) */}
                             <div className="cierre-sub-card">
-                              <h5 className="cierre-sub-card-title">📦 Resumen de Ventas (Productos)</h5>
-                              {cierreData.productos_vendidos && cierreData.productos_vendidos.length > 0 ? (
+                              <h5 className="cierre-sub-card-title">🍔 Total de Productos Vendidos (Unidades)</h5>
+                              {cierreData.productos_unificados && cierreData.productos_unificados.length > 0 ? (
                                 <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                  {cierreData.productos_vendidos.map((p, idx) => (
+                                  {cierreData.productos_unificados.map((p, idx) => (
+                                    <div key={idx} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span className="cierre-item-name" style={{ flex: 1 }}>{p.nombre_producto}</span>
+                                      {p.cantidad_directa > 0 && p.cantidad_promo > 0 && (
+                                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginRight: '0.75rem' }}>
+                                          ({p.cantidad_directa} indiv. + {p.cantidad_promo} promo)
+                                        </span>
+                                      )}
+                                      <strong className="cierre-item-qty" style={{ color: 'var(--accent-primary)', fontSize: '0.95rem' }}>
+                                        {p.cantidad_total} un.
+                                      </strong>
+                                    </div>
+                                  ))}
+                                  <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '2px dashed var(--accent-primary)', paddingTop: '0.65rem', marginTop: '0.5rem', background: 'rgba(255, 255, 255, 0.06)', fontWeight: 'bold' }}>
+                                    <span className="cierre-item-name" style={{ fontWeight: '700' }}>Total Unidades Producidas / Vendidas:</span>
+                                    <strong style={{ color: 'var(--accent-primary)', fontSize: '0.98rem' }}>
+                                      {cierreData.productos_unificados.reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0)} un.
+                                    </strong>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="cierre-empty-text">No hay productos registrados en esta fecha.</p>
+                              )}
+                            </div>
+
+                            {/* DETALLE FINANCIERO POR ÍTEM / PROMO COBRADA */}
+                            <div className="cierre-sub-card">
+                              <h5 className="cierre-sub-card-title">💳 Detalle Financiero por Ítem Cobrado ($)</h5>
+                              {(cierreData.productos_vendidos && cierreData.productos_vendidos.length > 0) || (cierreData.envases_vendidos && cierreData.envases_vendidos.cantidad > 0) ? (
+                                <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                  {cierreData.productos_vendidos && cierreData.productos_vendidos.map((p, idx) => (
                                     <div key={idx} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                       <span className="cierre-item-name" style={{ flex: 1 }}>{p.nombre_producto}</span>
                                       <span style={{ marginRight: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
@@ -4844,17 +4947,54 @@ function App() {
                                       </strong>
                                     </div>
                                   ))}
+                                  {cierreData.envases_vendidos && cierreData.envases_vendidos.cantidad > 0 && (
+                                    <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)' }}>
+                                      <span className="cierre-item-name" style={{ flex: 1 }}>🛍️ Envases para llevar</span>
+                                      <span style={{ marginRight: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                        {cierreData.envases_vendidos.cantidad} un.
+                                      </span>
+                                      <strong className="cierre-item-qty">
+                                        ${(cierreData.envases_vendidos.total_pesos || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                      </strong>
+                                    </div>
+                                  )}
                                   <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '2px dashed var(--accent-primary)', paddingTop: '0.65rem', marginTop: '0.5rem', background: 'rgba(255, 255, 255, 0.06)', fontWeight: 'bold' }}>
-                                    <span className="cierre-item-name" style={{ fontWeight: '700' }}>Total Productos:</span>
+                                    <span className="cierre-item-name" style={{ fontWeight: '700' }}>Total Productos y Envases:</span>
                                     <strong style={{ color: 'var(--accent-primary)', fontSize: '0.98rem' }}>
-                                      ${cierreData.productos_vendidos.reduce((acc, curr) => acc + (curr.total_pesos || 0), 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                      ${(
+                                        (cierreData.productos_vendidos || []).reduce((acc, curr) => acc + (curr.total_pesos || 0), 0) +
+                                        (cierreData.envases_vendidos ? (cierreData.envases_vendidos.total_pesos || 0) : 0)
+                                      ).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
                                     </strong>
                                   </div>
                                 </div>
                               ) : (
-                                <p className="cierre-empty-text">No hay productos vendidos en esta fecha.</p>
+                                <p className="cierre-empty-text">No hay productos ni envases vendidos en esta fecha.</p>
                               )}
                             </div>
+
+                            {/* Productos Incluidos en Promociones */}
+                            {cierreData.productos_promociones && cierreData.productos_promociones.length > 0 && (
+                              <div className="cierre-sub-card">
+                                <h5 className="cierre-sub-card-title">🍔 Productos Incluidos en Promociones</h5>
+                                <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                  {cierreData.productos_promociones.map((p, idx) => (
+                                    <div key={idx} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span className="cierre-item-name" style={{ flex: 1 }}>{p.nombre_producto}</span>
+                                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                        {p.cantidad_total} un.
+                                      </span>
+                                    </div>
+                                  ))}
+                                  <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '2px dashed var(--accent-primary)', paddingTop: '0.65rem', marginTop: '0.5rem', background: 'rgba(255, 255, 255, 0.06)', fontWeight: 'bold' }}>
+                                    <span className="cierre-item-name" style={{ fontWeight: '700' }}>Total Productos en Promociones:</span>
+                                    <strong style={{ color: 'var(--accent-primary)', fontSize: '0.98rem' }}>
+                                      {cierreData.productos_promociones.reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0)} un.
+                                    </strong>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
 
                             {/* Materia Prima Gastada */}
                             <div className="cierre-sub-card">
@@ -5817,7 +5957,7 @@ function App() {
 
                               return Object.values(agrupados).map((optGroup, oIdx) => (
                                 <div key={oIdx}>
-                                  {optGroup.cantidad > 1 ? `${optGroup.cantidad}x ` : ''}{optGroup.nombre_producto}
+                                  - {optGroup.cantidad > 1 ? `${optGroup.cantidad}x ` : ''}{optGroup.nombre_producto}
                                 </div>
                               ));
                             })()}
@@ -5843,16 +5983,16 @@ function App() {
               <div className="comanda-attendant">
                 Fue atendido por {comandaData.atendido_por}
               </div>
-              {comandaData.tipo_entrega === 'Llevar' && comandaData.cantidad_envases > 0 && (
+              {((comandaData.cantidad_envases > 0) || (comandaData.monto_envases > 0)) && (
                 <div style={{
                   textAlign: 'right',
-                  fontSize: '0.78rem',
+                  fontSize: '0.8rem',
                   fontWeight: '600',
                   color: 'var(--ticket-text-secondary, #666)',
-                  marginTop: '0.25rem',
-                  marginBottom: '0.15rem'
+                  marginTop: '0.35rem',
+                  marginBottom: '0.25rem'
                 }}>
-                  📦 Envases p/llevar: {comandaData.cantidad_envases} (${parseFloat(comandaData.monto_envases || 0).toLocaleString('es-CL')})
+                  📦 Envases p/llevar: {comandaData.cantidad_envases || 0} (${(parseFloat(comandaData.monto_envases || 0)).toLocaleString('es-CL', { minimumFractionDigits: 0 })})
                 </div>
               )}
               <div className="comanda-total-row">
