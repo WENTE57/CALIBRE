@@ -50,7 +50,10 @@ app.use(express.json()); // Permite procesar peticiones JSON
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pago_mixto_detalle TEXT");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cantidad_envases INT DEFAULT 0");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_envases DECIMAL(10, 2) DEFAULT 0");
-    console.log("✅ Tabla 'pedidos' asegurada (con columnas de transacciones y envases).");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS eliminado BOOLEAN DEFAULT FALSE");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS eliminado_por VARCHAR(100)");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS eliminado_fecha TIMESTAMP");
+    console.log("✅ Tabla 'pedidos' asegurada (con columnas de transacciones, envases y eliminación).");
 
     // 4. Asegurar tabla pedido_productos
     await pool.query(`
@@ -1388,6 +1391,7 @@ app.get('/api/pedidos', async (req, res) => {
              ) as productos
       FROM pedidos p
       LEFT JOIN pedido_productos dp ON p.id = dp.pedido_id
+      WHERE (p.eliminado IS FALSE OR p.eliminado IS NULL)
       GROUP BY p.id
       ORDER BY p.fecha_hora DESC
     `);
@@ -1401,6 +1405,130 @@ app.get('/api/pedidos', async (req, res) => {
       success: false,
       message: 'Error al obtener el historial de pedidos.'
     });
+  }
+});
+
+// Endpoint para eliminar comanda (Soft-delete con verificación de contraseña de Administrador)
+app.delete('/api/pedidos/:id', async (req, res) => {
+  const { id } = req.params;
+  const { contrasena, admin_nombre } = req.body || {};
+
+  if (!contrasena) {
+    return res.status(400).json({
+      success: false,
+      message: 'Se requiere ingresar la contraseña de Administrador.'
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    // 1. Validar la contraseña de Administrador
+    let adminRes;
+    if (admin_nombre) {
+      adminRes = await client.query(
+        "SELECT id, nombre, contrasena, cargo FROM usuarios WHERE LOWER(nombre) = LOWER($1) AND LOWER(cargo) = 'administrador'",
+        [admin_nombre.trim()]
+      );
+    }
+    
+    if (!adminRes || adminRes.rows.length === 0) {
+      adminRes = await client.query(
+        "SELECT id, nombre, contrasena, cargo FROM usuarios WHERE LOWER(cargo) = 'administrador' AND contrasena = $1 LIMIT 1",
+        [contrasena.trim()]
+      );
+    }
+
+    if (adminRes.rows.length === 0 || adminRes.rows[0].contrasena !== contrasena.trim()) {
+      return res.status(401).json({
+        success: false,
+        message: 'Contraseña de administrador incorrecta.'
+      });
+    }
+
+    const adminUser = adminRes.rows[0];
+
+    // 2. Verificar existencia del pedido
+    const orderRes = await client.query(
+      'SELECT id, cliente_nombre, total, (eliminado IS TRUE) as esta_eliminado FROM pedidos WHERE id = $1',
+      [id]
+    );
+
+    if (orderRes.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'La comanda especificada no existe.' });
+    }
+
+    if (orderRes.rows[0].esta_eliminado) {
+      return res.status(400).json({ success: false, message: 'La comanda ya ha sido eliminada previamente.' });
+    }
+
+    await client.query('BEGIN');
+
+    // 3. Revertir el descuento de ingredientes en el inventario
+    const itemsRes = await client.query(
+      'SELECT producto_id, cantidad, promocion_id, productos_incluidos FROM pedido_productos WHERE pedido_id = $1',
+      [id]
+    );
+
+    for (const item of itemsRes.rows) {
+      const isPromo = !!(item.promocion_id || item.productos_incluidos);
+      const cantItem = parseInt(item.cantidad) || 1;
+
+      if (isPromo) {
+        let incluidos = item.productos_incluidos;
+        if (typeof incluidos === 'string') {
+          try { incluidos = JSON.parse(incluidos); } catch(e) { incluidos = null; }
+        }
+
+        if (Array.isArray(incluidos) && incluidos.length > 0) {
+          for (const inc of incluidos) {
+            if (inc.producto_id) {
+              const recipeRes = await client.query(
+                'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
+                [inc.producto_id]
+              );
+              for (const recipeItem of recipeRes.rows) {
+                const restoreAmount = parseFloat(recipeItem.cantidad) * (parseInt(inc.cantidad) || 1) * cantItem;
+                await client.query(
+                  'UPDATE ingredientes SET stock = stock + $1 WHERE id = $2',
+                  [restoreAmount, recipeItem.ingrediente_id]
+                );
+              }
+            }
+          }
+        }
+      } else if (item.producto_id) {
+        const recipeRes = await client.query(
+          'SELECT ingrediente_id, cantidad FROM producto_ingredientes WHERE producto_id = $1',
+          [item.producto_id]
+        );
+        for (const recipeItem of recipeRes.rows) {
+          const restoreAmount = parseFloat(recipeItem.cantidad) * cantItem;
+          await client.query(
+            'UPDATE ingredientes SET stock = stock + $1 WHERE id = $2',
+            [restoreAmount, recipeItem.ingrediente_id]
+          );
+        }
+      }
+    }
+
+    // 4. Marcar la comanda como eliminada (Soft-delete)
+    await client.query(
+      'UPDATE pedidos SET eliminado = TRUE, eliminado_por = $1, eliminado_fecha = CURRENT_TIMESTAMP WHERE id = $2',
+      [adminUser.nombre, id]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: `Comanda Ticket #${id} del cliente "${orderRes.rows[0].cliente_nombre}" eliminada correctamente.`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en DELETE /api/pedidos/:id:', err.message);
+    res.status(500).json({ success: false, message: 'Error interno al eliminar la comanda.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1421,7 +1549,7 @@ app.get('/api/informes/cierre', async (req, res) => {
         COALESCE(SUM(CASE WHEN tipo_transaccion = 'Débito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_debito, 0) ELSE 0 END), 0)::FLOAT as total_debito,
         COALESCE(SUM(CASE WHEN tipo_transaccion = 'Crédito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_credito, 0) ELSE 0 END), 0)::FLOAT as total_credito
       FROM pedidos
-      WHERE DATE(fecha_hora) = $1
+      WHERE DATE(fecha_hora) = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
     `, [fecha]);
 
     const row = result.rows[0];
@@ -1433,31 +1561,31 @@ app.get('/api/informes/cierre', async (req, res) => {
     const total_credito = row.total_credito;
     const total_tarjeta = total_debito + total_credito;
 
-    // Consultar el desglose de productos vendidos en el día
+    // Consultar el desglose de productos vendidos en el día (excluyendo comandas eliminadas)
     const productosResult = await pool.query(`
       SELECT 
-        nombre_producto,
-        SUM(cantidad)::INTEGER as cantidad_vendida,
-        SUM(cantidad * precio_unitario)::INTEGER as total_pesos
+        pp.nombre_producto,
+        SUM(pp.cantidad)::INTEGER as cantidad_vendida,
+        SUM(pp.cantidad * pp.precio_unitario)::INTEGER as total_pesos
       FROM pedidos p
       JOIN pedido_productos pp ON p.id = pp.pedido_id
-      WHERE DATE(p.fecha_hora) = $1
-      GROUP BY nombre_producto
+      WHERE DATE(p.fecha_hora) = $1 AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
+      GROUP BY pp.nombre_producto
       ORDER BY cantidad_vendida DESC
     `, [fecha]);
 
-    // Consultar total de envases vendidos en el día
+    // Consultar total de envases vendidos en el día (excluyendo comandas eliminadas)
     const envasesResult = await pool.query(`
       SELECT 
         COALESCE(SUM(cantidad_envases), 0)::INTEGER as cantidad,
         COALESCE(SUM(monto_envases), 0)::INTEGER as total_pesos
       FROM pedidos
-      WHERE DATE(fecha_hora) = $1
+      WHERE DATE(fecha_hora) = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
     `, [fecha]);
 
     const envases_vendidos = envasesResult.rows[0] || { cantidad: 0, total_pesos: 0 };
 
-    // Consultar desglose de productos individuales (fijos y de pasos) incluidos en promociones vendidas en el día
+    // Consultar desglose de productos individuales incluidos en promociones vendidas en el día (excluyendo eliminadas)
     const promoProdsQuery = await pool.query(`
       SELECT 
         pp.promocion_id,
@@ -1466,7 +1594,8 @@ app.get('/api/informes/cierre', async (req, res) => {
         pp.productos_incluidos
       FROM pedidos p
       JOIN pedido_productos pp ON p.id = pp.pedido_id
-      WHERE DATE(p.fecha_hora) = $1
+      WHERE DATE(p.fecha_hora) = $1 
+        AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
         AND (
           pp.promocion_id IS NOT NULL 
           OR pp.productos_incluidos IS NOT NULL 
@@ -1483,9 +1612,10 @@ app.get('/api/informes/cierre', async (req, res) => {
       }
 
       if (Array.isArray(incluidos) && incluidos.length > 0) {
+        const promoQty = parseInt(row.promo_cantidad) || 1;
         for (const item of incluidos) {
           const nom = item.nombre_producto;
-          const cant = parseInt(item.cantidad) || 1;
+          const cant = (parseInt(item.cantidad) || 1) * promoQty;
           if (nom) {
             mapaProdsPromo[nom] = (mapaProdsPromo[nom] || 0) + cant;
           }
@@ -1578,7 +1708,7 @@ app.get('/api/informes/cierre', async (req, res) => {
     const productos_unificados = Object.values(mapaUnificados)
       .sort((a, b) => b.cantidad_total - a.cantidad_total);
 
-    // Consultar el gasto real de ingredientes (materia prima) basado en la totalidad de productos vendidos (directos + promociones)
+    // Consultar el gasto real de ingredientes (materia prima) basado en la totalidad de productos vendidos
     const mapaIngredientesGastados = {};
 
     for (const prod of productos_unificados) {
@@ -1614,6 +1744,23 @@ app.get('/api/informes/cierre', async (req, res) => {
     const ingredientes_gastados = Object.values(mapaIngredientesGastados)
       .sort((a, b) => b.cantidad_gastada - a.cantidad_gastada);
 
+    // Consultar comandas eliminadas en la fecha seleccionada
+    const eliminadasResult = await pool.query(`
+      SELECT 
+        id, 
+        cliente_nombre, 
+        total::FLOAT, 
+        COALESCE(eliminado_por, 'Administrador') as eliminado_por, 
+        TO_CHAR(eliminado_fecha, 'HH24:MI') as hora_eliminado
+      FROM pedidos
+      WHERE DATE(fecha_hora) = $1 AND eliminado = TRUE
+      ORDER BY eliminado_fecha DESC
+    `, [fecha]);
+
+    const comandas_eliminadas = eliminadasResult.rows;
+    const cantidad_eliminadas = comandas_eliminadas.length;
+    const monto_total_eliminado = comandas_eliminadas.reduce((acc, curr) => acc + (curr.total || 0), 0);
+
     res.json({
       success: true,
       data: {
@@ -1629,7 +1776,10 @@ app.get('/api/informes/cierre', async (req, res) => {
         envases_vendidos,
         productos_promociones,
         productos_unificados,
-        ingredientes_gastados
+        ingredientes_gastados,
+        comandas_eliminadas,
+        cantidad_eliminadas,
+        monto_total_eliminado
       }
     });
   } catch (err) {

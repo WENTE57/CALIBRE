@@ -56,13 +56,15 @@ const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- B
           left: 0,
           right: 0,
           marginTop: '4px',
-          background: 'var(--item-bg)',
+          background: 'var(--dropdown-bg, #231209)',
           border: '1.5px solid var(--accent-primary)',
           borderRadius: '12px',
-          boxShadow: 'var(--card-shadow)',
+          boxShadow: 'var(--dropdown-shadow, 0 12px 32px rgba(0, 0, 0, 0.85))',
           zIndex: 99999,
           overflow: 'hidden',
-          padding: '0.4rem'
+          padding: '0.45rem',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)'
         }}>
           <input
             type="text"
@@ -74,16 +76,18 @@ const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- B
             onClick={(e) => e.stopPropagation()}
             style={{
               width: '100%',
-              height: '34px',
-              fontSize: '0.82rem',
-              marginBottom: '0.4rem',
+              height: '36px',
+              fontSize: '0.85rem',
+              marginBottom: '0.45rem',
               background: 'var(--input-bg)',
-              color: 'var(--text-primary)'
+              color: 'var(--text-primary)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: '8px'
             }}
           />
-          <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+          <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
             {filteredOptions.length === 0 ? (
-              <div style={{ padding: '0.5rem', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+              <div style={{ padding: '0.6rem', fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center' }}>
                 No hay coincidencias
               </div>
             ) : (
@@ -97,19 +101,20 @@ const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- B
                     setSearch('');
                   }}
                   style={{
-                    padding: '0.45rem 0.65rem',
-                    fontSize: '0.82rem',
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.84rem',
                     color: String(opt.value) === String(value) ? 'var(--accent-primary)' : 'var(--text-primary)',
                     fontWeight: String(opt.value) === String(value) ? 'bold' : 'normal',
-                    borderRadius: '6px',
+                    borderRadius: '8px',
                     cursor: 'pointer',
-                    background: String(opt.value) === String(value) ? 'rgba(234, 88, 12, 0.15)' : 'transparent',
+                    background: String(opt.value) === String(value) ? 'rgba(234, 88, 12, 0.25)' : 'transparent',
                     display: 'flex',
                     justify: 'space-between',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    transition: 'background 0.15s ease'
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(234, 88, 12, 0.15)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = String(opt.value) === String(value) ? 'rgba(234, 88, 12, 0.15)' : 'transparent'}
+                  onMouseEnter={(e) => e.currentTarget.style.background = String(opt.value) === String(value) ? 'rgba(234, 88, 12, 0.3)' : 'rgba(234, 88, 12, 0.15)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = String(opt.value) === String(value) ? 'rgba(234, 88, 12, 0.25)' : 'transparent'}
                 >
                   <span>{opt.label}</span>
                 </div>
@@ -120,6 +125,78 @@ const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- B
       )}
     </div>
   );
+};
+
+const getPromoSubItems = (item) => {
+  if (!item) return [];
+  const subItems = [];
+
+  const getItemName = (obj) => {
+    if (!obj) return '';
+    if (typeof obj === 'string') return obj.trim();
+    return (
+      obj.nombre_producto ||
+      obj.nombre ||
+      obj.nombre_opcion ||
+      obj.producto_nombre ||
+      obj.label ||
+      ''
+    ).trim();
+  };
+
+  // 1. Si vienen productos_incluidos (formato procesado por backend / BD)
+  if (item.productos_incluidos && Array.isArray(item.productos_incluidos) && item.productos_incluidos.length > 0) {
+    const agrupados = item.productos_incluidos.reduce((acc, opt) => {
+      const nom = getItemName(opt);
+      if (nom && nom !== 'undefined') {
+        const cant = parseInt(opt.cantidad) || 1;
+        if (!acc[nom]) {
+          acc[nom] = { nombre: nom, cantidad: 0 };
+        }
+        acc[nom].cantidad += cant;
+      }
+      return acc;
+    }, {});
+
+    Object.values(agrupados).forEach(group => {
+      const cantStr = group.cantidad > 1 ? `${group.cantidad}x ` : '';
+      subItems.push(`${cantStr}${group.nombre}`);
+    });
+  } else {
+    // 2. Productos fijos de la promoción
+    if (item.productos_fijos && Array.isArray(item.productos_fijos) && item.productos_fijos.length > 0) {
+      item.productos_fijos.forEach(pf => {
+        const nom = getItemName(pf);
+        if (nom && nom !== 'undefined') {
+          const cant = parseInt(pf.cantidad) || 1;
+          const cantStr = cant > 1 ? `${cant}x ` : '';
+          subItems.push(`${cantStr}${nom}`);
+        }
+      });
+    }
+
+    // 3. Opciones elegidas en los pasos de la promoción (agrupadas)
+    if (item.opciones_elegidas && Array.isArray(item.opciones_elegidas) && item.opciones_elegidas.length > 0) {
+      const agrupados = item.opciones_elegidas.reduce((acc, opt) => {
+        const nom = getItemName(opt);
+        if (nom && nom !== 'undefined') {
+          const cant = parseInt(opt.cantidad) || 1;
+          if (!acc[nom]) {
+            acc[nom] = { nombre: nom, cantidad: 0 };
+          }
+          acc[nom].cantidad += cant;
+        }
+        return acc;
+      }, {});
+
+      Object.values(agrupados).forEach(group => {
+        const cantStr = group.cantidad > 1 ? `${group.cantidad}x ` : '';
+        subItems.push(`${cantStr}${group.nombre}`);
+      });
+    }
+  }
+
+  return subItems.filter(str => str && !str.includes('undefined'));
 };
 
 function App() {
@@ -252,6 +329,57 @@ function App() {
   const [comandaData, setComandaData] = useState(null);
   const [historialPedidos, setHistorialPedidos] = useState([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
+
+  // Estados para eliminación de comanda con contraseña de Administrador
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [pedidoToDelete, setPedidoToDelete] = useState(null);
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [errorDeleteModal, setErrorDeleteModal] = useState('');
+  const [loadingDeleteModal, setLoadingDeleteModal] = useState(false);
+
+  const handleConfirmDeletePedido = async (e) => {
+    if (e) e.preventDefault();
+    if (!pedidoToDelete || !adminPasswordInput.trim()) {
+      setErrorDeleteModal('Por favor ingresa la contraseña de Administrador.');
+      return;
+    }
+
+    setLoadingDeleteModal(true);
+    setErrorDeleteModal('');
+
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/pedidos/${pedidoToDelete.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contrasena: adminPasswordInput.trim(),
+          admin_nombre: user?.nombre || ''
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'No se pudo eliminar la comanda.');
+      }
+
+      setShowDeleteModal(false);
+      setPedidoToDelete(null);
+      setAdminPasswordInput('');
+      setErrorDeleteModal('');
+
+      cargarHistorialPedidos();
+      cargarIngredientes();
+      if (typeof cargarCierreCaja === 'function') {
+        cargarCierreCaja();
+      }
+    } catch (err) {
+      console.error('Error al eliminar la comanda:', err);
+      setErrorDeleteModal(err.message || 'Error al conectar con el servidor.');
+    } finally {
+      setLoadingDeleteModal(false);
+    }
+  };
   // Estados para administración de usuarios
   const [usuarios, setUsuarios] = useState([]);
   const [usuariosLoading, setUsuariosLoading] = useState(false);
@@ -1368,23 +1496,33 @@ function App() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setProdSuccess(data.message || (editandoProdId ? 'Producto actualizado correctamente.' : 'Producto creado correctamente.'));
-        setProdNombre('');
-        setProdPrecio('');
-        setProdImagen('🍔');
-        setProdAplicaEnvase('heredar');
-        if (activeTab === 'categorias' && selectedCatForProducts) {
-          setProdCategoria(selectedCatForProducts.nombre);
+        const wasEditing = !!editandoProdId;
+        setProdSuccess(data.message || (wasEditing ? 'Producto actualizado correctamente.' : 'Producto creado correctamente.'));
+        await cargarProductos();
+
+        if (wasEditing) {
+          // Mantener al usuario en la misma ventana de edición
+          setTimeout(() => {
+            setProdSuccess('');
+          }, 3500);
         } else {
-          setProdCategoria(listaCategorias[0]?.nombre || '');
-        }
-        setIngredientesSeleccionados([]);
-        setCurrIngredienteId('');
-        setCurrIngredienteCantidad('');
-        setEditandoProdId(null);
-        cargarProductos();
-        if (activeTab === 'categorias') {
-          setCatProductView('list');
+          // Al crear un nuevo producto, resetear el formulario y volver al listado
+          setProdNombre('');
+          setProdPrecio('');
+          setProdImagen('🍔');
+          setProdAplicaEnvase('heredar');
+          if (activeTab === 'categorias' && selectedCatForProducts) {
+            setProdCategoria(selectedCatForProducts.nombre);
+          } else {
+            setProdCategoria(listaCategorias[0]?.nombre || '');
+          }
+          setIngredientesSeleccionados([]);
+          setCurrIngredienteId('');
+          setCurrIngredienteCantidad('');
+          setEditandoProdId(null);
+          if (activeTab === 'categorias') {
+            setCatProductView('list');
+          }
         }
       } else {
         setProdError(data.message || (editandoProdId ? 'Error al actualizar el producto.' : 'Error al crear el producto.'));
@@ -2043,9 +2181,9 @@ function App() {
     }
   };
 
-  // Shortcut A+P+L+T para ingresar como el primer usuario Administrador desde la pantalla de Login
+  // Shortcut A+L+P+T para ingresar como el primer usuario Administrador desde la pantalla de Login
   const keysPressed = useRef(new Set());
-  const typedSequence = useRef('');
+  const keyTimestamps = useRef({});
 
   const handleAdminShortcutLogin = async () => {
     setLoading(true);
@@ -2078,30 +2216,49 @@ function App() {
     if (user) return; // Solo escuchar cuando estemos en la pantalla de Login
 
     const handleKeyDown = (e) => {
-      const key = e.key.toLowerCase();
-      keysPressed.current.add(key);
+      const key = e.key ? e.key.toLowerCase() : '';
+      const code = e.code ? e.code.toLowerCase() : '';
+      const now = Date.now();
 
-      // 1. Detectar si las teclas A, P, L, T están presionadas simultáneamente
-      const hasA = keysPressed.current.has('a');
-      const hasP = keysPressed.current.has('p');
-      const hasL = keysPressed.current.has('l');
-      const hasT = keysPressed.current.has('t');
+      // Mapear teclas A, L, P, T (por e.key o por e.code físico)
+      let char = '';
+      if (key === 'a' || code === 'keya') char = 'a';
+      else if (key === 'l' || code === 'keyl') char = 'l';
+      else if (key === 'p' || code === 'keyp') char = 'p';
+      else if (key === 't' || code === 'keyt') char = 't';
 
-      // 2. Detectar si fueron tipeadas secuencialmente (aplt)
-      if (key.length === 1 && /[a-z]/i.test(key)) {
-        typedSequence.current = (typedSequence.current + key).slice(-4);
-      }
+      if (char) {
+        keysPressed.current.add(char);
+        keyTimestamps.current[char] = now;
 
-      if ((hasA && hasP && hasL && hasT) || typedSequence.current === 'aplt') {
-        keysPressed.current.clear();
-        typedSequence.current = '';
-        handleAdminShortcutLogin();
+        // 1. Verificación simultánea (manteniendo presionadas A, L, P, T al mismo tiempo)
+        const hasA = keysPressed.current.has('a');
+        const hasL = keysPressed.current.has('l');
+        const hasP = keysPressed.current.has('p');
+        const hasT = keysPressed.current.has('t');
+
+        // 2. Verificación por ventana de tiempo (si fueron presionadas/tocadas en un lapso de 800ms)
+        const times = keyTimestamps.current;
+        const recentA = times.a && (now - times.a < 800);
+        const recentL = times.l && (now - times.l < 800);
+        const recentP = times.p && (now - times.p < 800);
+        const recentT = times.t && (now - times.t < 800);
+
+        if ((hasA && hasL && hasP && hasT) || (recentA && recentL && recentP && recentT)) {
+          keysPressed.current.clear();
+          keyTimestamps.current = {};
+          handleAdminShortcutLogin();
+        }
       }
     };
 
     const handleKeyUp = (e) => {
-      const key = e.key.toLowerCase();
-      keysPressed.current.delete(key);
+      const key = e.key ? e.key.toLowerCase() : '';
+      const code = e.code ? e.code.toLowerCase() : '';
+      if (key === 'a' || code === 'keya') keysPressed.current.delete('a');
+      if (key === 'l' || code === 'keyl') keysPressed.current.delete('l');
+      if (key === 'p' || code === 'keyp') keysPressed.current.delete('p');
+      if (key === 't' || code === 'keyt') keysPressed.current.delete('t');
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -2209,9 +2366,23 @@ function App() {
         {!user ? (
           /* Formulario de Login */
           <div className="glass-card">
-            <div className="card-header">
-              <img src={logoImg} alt="Calibre 25" className="logo-image" />
-              <p className="card-subtitle">Inicia sesión para acceder al sistema</p>
+            <div className="card-header" style={{ position: 'relative' }}>
+              <img 
+                src={logoImg} 
+                alt="Calibre 25" 
+                className="logo-image" 
+                title="Doble clic para ingreso directo como Administrador"
+                onDoubleClick={handleAdminShortcutLogin}
+                style={{ cursor: 'pointer' }}
+              />
+              <p 
+                className="card-subtitle" 
+                title="Doble clic para ingreso directo como Administrador"
+                onDoubleClick={handleAdminShortcutLogin}
+                style={{ cursor: 'pointer' }}
+              >
+                Inicia sesión para acceder al sistema
+              </p>
             </div>
 
             {error && (
@@ -2311,12 +2482,6 @@ function App() {
                       className={`nav-tab ${activeTab === 'usuarios' ? 'active' : ''}`}
                     >
                       👥 Usuarios
-                    </button>
-                    <button 
-                      onClick={() => setActiveTab('productos')} 
-                      className={`nav-tab ${activeTab === 'productos' ? 'active' : ''}`}
-                    >
-                      📦 Productos
                     </button>
                     <button 
                       onClick={() => setActiveTab('categorias')} 
@@ -2633,35 +2798,19 @@ function App() {
                               <span className="item-emoji">{item.imagen || '🍔'}</span>
                               <div className="item-details">
                                 <span className="item-name">{item.nombre}</span>
-                                {item.opciones_elegidas && item.opciones_elegidas.length > 0 && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.2rem' }}>
-                                    {(() => {
-                                      const agrupados = item.opciones_elegidas.reduce((acc, opt) => {
-                                        const nombre = opt.nombre_producto;
-                                        if (!acc[nombre]) {
-                                          acc[nombre] = { nombre_producto: nombre, cantidad: 0 };
-                                        }
-                                        acc[nombre].cantidad += 1;
-                                        return acc;
-                                      }, {});
-
-                                      return Object.values(agrupados).map((optGroup, oIdx) => (
-                                        <span key={oIdx} style={{ fontSize: '0.82rem', color: '#10b981', fontWeight: '600', lineHeight: 1.3 }}>
-                                          {optGroup.cantidad > 1 ? `${optGroup.cantidad}x ` : ''}{optGroup.nombre_producto}
+                                {(() => {
+                                  const subItems = getPromoSubItems(item);
+                                  if (subItems.length === 0) return null;
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.2rem' }}>
+                                      {subItems.map((sub, sIdx) => (
+                                        <span key={sIdx} style={{ fontSize: '0.82rem', color: '#10b981', fontWeight: '600', lineHeight: 1.3 }}>
+                                          - {sub}
                                         </span>
-                                      ));
-                                    })()}
-                                  </div>
-                                )}
-                                {item.productos_fijos && item.productos_fijos.length > 0 && (!item.opciones_elegidas || item.opciones_elegidas.length === 0) && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.2rem' }}>
-                                    {item.productos_fijos.map((pf, fIdx) => (
-                                      <span key={fIdx} style={{ fontSize: '0.82rem', color: '#10b981', fontWeight: '600', lineHeight: 1.3 }}>
-                                        {pf.cantidad}x {pf.nombre_producto}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
                                 <span className="item-price">
                                   ${(parseFloat(item.precio) * item.cantidad).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
                                 </span>
@@ -2938,335 +3087,7 @@ function App() {
               </div>
             )}
 
-            {/* PESTAÑA DE PRODUCTOS (Solo Admin) */}
-            {activeTab === 'productos' && user.cargo.toLowerCase() === 'administrador' && (
-              <div className="admin-tab-content animate-fade">
-                <div className="admin-grid-layout">
-                  {/* Formulario de creación */}
-                  <div className="admin-section">
-                    <h3 className="section-title">
-                      {editandoProdId ? '✏️ Editar Producto' : '📦 Registrar Nuevo Producto'}
-                    </h3>
-                    <p className="section-subtitle">
-                      {editandoProdId ? 'Edita los datos del producto seleccionado' : 'Registra un nuevo plato o artículo al catálogo'}
-                    </p>
-                    
-                    {prodError && (
-                      <div className="alert alert-error">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10"></circle>
-                          <line x1="12" y1="8" x2="12" y2="12"></line>
-                          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                        </svg>
-                        <span>{prodError}</span>
-                      </div>
-                    )}
-                    {prodSuccess && (
-                      <div className="alert alert-success">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                          <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                        </svg>
-                        <span>{prodSuccess}</span>
-                      </div>
-                    )}
 
-                    <form onSubmit={handleRegisterProduct} className="admin-form">
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="prodNombre">Nombre del Producto</label>
-                        <div className="input-wrapper">
-                          <input
-                            type="text"
-                            id="prodNombre"
-                            className="form-input"
-                            placeholder="Ej. Hamburguesa Doble"
-                            value={prodNombre}
-                            onChange={(e) => setProdNombre(e.target.value)}
-                            disabled={prodLoading}
-                          />
-                          <span className="input-icon">🍔</span>
-                        </div>
-                      </div>
-                      
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="prodPrecio">Precio ($)</label>
-                        <div className="input-wrapper">
-                          <input
-                            type="number"
-                            id="prodPrecio"
-                            className="form-input"
-                            placeholder="Ej. 5500"
-                            value={prodPrecio}
-                            onChange={(e) => setProdPrecio(e.target.value)}
-                            disabled={prodLoading}
-                          />
-                          <span className="input-icon">💲</span>
-                        </div>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="prodImagen">Emoji Representativo</label>
-                        <div className="input-wrapper">
-                          <select
-                            id="prodImagen"
-                            className="form-input form-select"
-                            value={prodImagen}
-                            onChange={(e) => setProdImagen(e.target.value)}
-                            disabled={prodLoading}
-                          >
-                            <option value="🍔">🍔 Hamburguesa</option>
-                            <option value="🧀">🧀 Queso / Cheeseburger</option>
-                            <option value="🍟">🍟 Papas Fritas</option>
-                            <option value="🥤">🥤 Bebida / Coca-Cola (Vaso)</option>
-                            <option value="🍾">🍾 Botella de Gaseosa</option>
-                            <option value="🥫">🥫 Lata de Bebida / Gaseosa</option>
-                            <option value="💧">💧 Botella de Agua</option>
-                            <option value="🧃">🧃 Jugo / Cajita</option>
-                            <option value="🧅">🧅 Aros de Cebolla</option>
-                            <option value="🍕">🍕 Pizza</option>
-                            <option value="🌮">🌮 Taco</option>
-                            <option value="🌭">🌭 Hot Dog / Completo</option>
-                            <option value="🍦">🍦 Helado</option>
-                            <option value="🍗">🍗 Pollo Frito</option>
-                            <option value="☕">☕ Café</option>
-                            <option value="🍵">🍵 Té</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label" htmlFor="prodCategoria">Categoría</label>
-                        <div className="input-wrapper">
-                          <select
-                            id="prodCategoria"
-                            className="form-input form-select"
-                            value={prodCategoria}
-                            onChange={(e) => setProdCategoria(e.target.value)}
-                            disabled={prodLoading}
-                          >
-                            {listaCategorias.map(cat => (
-                              <option key={cat.id} value={cat.nombre}>
-                                {cat.emoji || '🏷️'} {cat.nombre}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Cobro de Envase (Para Llevar)</label>
-                        <div className="input-wrapper">
-                          <select
-                            className="form-input form-select"
-                            value={prodAplicaEnvase}
-                            onChange={(e) => setProdAplicaEnvase(e.target.value)}
-                            disabled={prodLoading}
-                          >
-                            <option value="heredar">⚙️ Heredar de la Categoría</option>
-                            <option value="si">✅ Sí cobrar envase (+1 envase)</option>
-                            <option value="no">🚫 No cobrar envase (Exento)</option>
-                          </select>
-                        </div>
-                      </div>
-
-
-
-                      <div className="form-group">
-                        <label className="form-label">Ingredientes del Producto</label>
-                        <div className="ingredients-selector-row">
-                          <select
-                            className="form-input form-select ingrediente-select"
-                            value={currIngredienteId}
-                            onChange={(e) => setCurrIngredienteId(e.target.value)}
-                            disabled={prodLoading}
-                            onKeyDown={(e) => handleIngredientesKeyDown(e, 'select')}
-                          >
-                            <option value="">-- Seleccionar Ingrediente --</option>
-                            {listaIngredientes.map((ing) => (
-                              <option key={ing.id} value={ing.id}>
-                                {ing.nombre}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            type="number"
-                            step="any"
-                            className="form-input ingrediente-cantidad-input"
-                            placeholder="Cant."
-                            value={currIngredienteCantidad}
-                            onChange={(e) => setCurrIngredienteCantidad(e.target.value)}
-                            disabled={prodLoading}
-                            onKeyDown={(e) => handleIngredientesKeyDown(e, 'quantity')}
-                          />
-                          <button
-                            type="button"
-                            onClick={agregarIngredienteAlForm}
-                            className="btn-secondary btn-add-ingredient"
-                            disabled={prodLoading}
-                            onKeyDown={(e) => handleIngredientesKeyDown(e, 'button')}
-                          >
-                            + Agregar
-                          </button>
-                        </div>
-
-                        {/* Listado de ingredientes seleccionados */}
-                        {ingredientesSeleccionados.length > 0 && (
-                          <div className="selected-ingredients-container">
-                            <span className="selected-title">Ingredientes seleccionados:</span>
-                            <div className="selected-ingredients-list">
-                              {ingredientesSeleccionados.map((ing) => (
-                                <span key={ing.ingrediente_id} className="selected-ingredient-badge">
-                                  {ing.nombre}: <strong>{ing.cantidad}</strong>
-                                  <button
-                                    type="button"
-                                    onClick={() => quitarIngredienteDelForm(ing.ingrediente_id)}
-                                    className="btn-remove-badge"
-                                    title="Quitar ingrediente"
-                                  >
-                                    &times;
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                        <button type="submit" className="btn-primary" style={{ flex: 1 }} disabled={prodLoading}>
-                          {prodLoading ? (
-                            <>
-                              <div className="spinner"></div>
-                              <span>{editandoProdId ? 'Guardando...' : 'Registrando...'}</span>
-                            </>
-                          ) : (
-                            <span>{editandoProdId ? 'Guardar Cambios' : 'Registrar Producto'}</span>
-                          )}
-                        </button>
-                        {editandoProdId && (
-                          <button
-                            type="button"
-                            onClick={cancelarEdicionProd}
-                            className="btn-secondary"
-                            style={{ flex: 1 }}
-                            disabled={prodLoading}
-                          >
-                            Cancelar
-                          </button>
-                        )}
-                      </div>
-                      {editandoProdId && (
-                        <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                          <button
-                            type="button"
-                            onClick={() => navegarEdicionProd('anterior')}
-                            className="btn-secondary"
-                            style={{ flex: 1, display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
-                            disabled={prodLoading || getProductIndexInfo().isFirst}
-                          >
-                            ◀️ Anterior
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => navegarEdicionProd('siguiente')}
-                            className="btn-secondary"
-                            style={{ flex: 1, display: 'flex', gap: '0.5rem', justifyContent: 'center', alignItems: 'center' }}
-                            disabled={prodLoading || getProductIndexInfo().isLast}
-                          >
-                            Siguiente ▶️
-                          </button>
-                        </div>
-                      )}
-                    </form>
-                  </div>
-
-                  {/* Listado de productos */}
-                  <div className="admin-section users-list-section">
-                    <h3 className="section-title">📋 Catálogo de Productos</h3>
-                    <p className="section-subtitle font-sm">Lista de productos disponibles para pedidos</p>
-
-                    <div style={{ margin: '1rem 0' }}>
-                      <input
-                        type="text"
-                        placeholder="🔍 Buscar producto por nombre o categoría..."
-                        className="form-input"
-                        style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
-                        value={filtroProductoAdmin}
-                        onChange={(e) => setFiltroProductoAdmin(e.target.value)}
-                      />
-                    </div>
-
-                    {productosLoading && (
-                      <div className="loading-container">
-                        <div className="spinner"></div>
-                        <span>Cargando productos...</span>
-                      </div>
-                    )}
-
-                    {productosError && (
-                      <div className="alert alert-error">
-                        <span>{productosError}</span>
-                      </div>
-                    )}
-
-                    {!productosLoading && !productosError && (
-                      <div className="users-list-container">
-                        {productos
-                          .filter((p) => {
-                            const term = filtroProductoAdmin.trim().toLowerCase();
-                            if (!term) return true;
-                            return (
-                              p.nombre.toLowerCase().includes(term) ||
-                              (p.categoria && p.categoria.toLowerCase().includes(term))
-                            );
-                          })
-                          .map((p) => (
-                            <div key={p.id} className="user-list-item">
-                            <div className="user-list-info" style={{ flexGrow: 1 }}>
-                              <span className="user-list-name">
-                                {p.imagen || '🍔'} {p.nombre}
-                              </span>
-                              {p.ingredientes && p.ingredientes.length > 0 && (
-                                <div className="product-list-ingredients">
-                                  <span className="ingredients-label">Ingredientes:</span>{' '}
-                                  {p.ingredientes.map(ing => `${ing.nombre} (${ing.cantidad})`).join(', ')}
-                                </div>
-                              )}
-                            </div>
-                            
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                              <div className="product-list-badges" style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
-                                <span className="badge badge-category">{p.categoria || 'Otros'}</span>
-                                <span className="badge">
-                                  ${parseFloat(p.precio).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                                </span>
-                              </div>
-                              
-                              <button
-                                onClick={() => iniciarEdicionProd(p)}
-                                className="btn-edit-user"
-                                title="Editar producto"
-                                style={{ marginRight: '-0.75rem' }}
-                              >
-                                ✏️
-                              </button>
-                              
-                              <button
-                                onClick={() => handleDeleteProduct(p.id, p.nombre)}
-                                className="btn-delete-user"
-                                title="Eliminar producto"
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* PESTAÑA DE CATEGORÍAS (Solo Admin) */}
             {activeTab === 'categorias' && user.cargo.toLowerCase() === 'administrador' && (
@@ -4775,6 +4596,36 @@ function App() {
                                 <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                                   {new Date(ped.fecha_hora).toLocaleDateString('es-CL')} - {new Date(ped.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
                                 </span>
+                                {user?.cargo?.toLowerCase() === 'administrador' && (
+                                   <button
+                                     type="button"
+                                     className="btn-danger"
+                                     style={{
+                                       padding: '0.3rem 0.65rem',
+                                       fontSize: '0.78rem',
+                                       borderRadius: '8px',
+                                       background: 'rgba(239, 68, 68, 0.18)',
+                                       border: '1px solid rgba(239, 68, 68, 0.4)',
+                                       color: '#ef4444',
+                                       fontWeight: 'bold',
+                                       cursor: 'pointer',
+                                       display: 'flex',
+                                       alignItems: 'center',
+                                       gap: '0.25rem',
+                                       transition: 'all 0.2s ease'
+                                     }}
+                                     title="Eliminar Comanda (Requiere contraseña Admin)"
+                                     onClick={(e) => {
+                                       e.stopPropagation();
+                                       setPedidoToDelete(ped);
+                                       setAdminPasswordInput('');
+                                       setErrorDeleteModal('');
+                                       setShowDeleteModal(true);
+                                     }}
+                                   >
+                                     🗑️ Eliminar
+                                   </button>
+                                 )}
                                 <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>➔</span>
                               </div>
                             </div>
@@ -5938,37 +5789,27 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {comandaData.productos.map((prod, idx) => (
-                    <tr key={idx}>
-                      <td>{prod.cantidad}</td>
-                      <td>
-                        <div style={{ fontWeight: 'bold' }}>{prod.nombre}</div>
-                        {prod.opciones_elegidas && prod.opciones_elegidas.length > 0 && (
-                          <div style={{ fontSize: '0.8rem', color: '#10b981', marginTop: '0.15rem', fontWeight: '600' }}>
-                            {(() => {
-                              const agrupados = prod.opciones_elegidas.reduce((acc, opt) => {
-                                const nombre = opt.nombre_producto;
-                                if (!acc[nombre]) {
-                                  acc[nombre] = { nombre_producto: nombre, cantidad: 0 };
-                                }
-                                acc[nombre].cantidad += 1;
-                                return acc;
-                              }, {});
-
-                              return Object.values(agrupados).map((optGroup, oIdx) => (
-                                <div key={oIdx}>
-                                  - {optGroup.cantidad > 1 ? `${optGroup.cantidad}x ` : ''}{optGroup.nombre_producto}
-                                </div>
-                              ));
-                            })()}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        ${(parseFloat(prod.precio) * prod.cantidad).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-                      </td>
-                    </tr>
-                  ))}
+                  {comandaData.productos.map((prod, idx) => {
+                    const subItems = getPromoSubItems(prod);
+                    return (
+                      <tr key={idx}>
+                        <td>{prod.cantidad}</td>
+                        <td>
+                          <div style={{ fontWeight: 'bold' }}>{prod.nombre || 'Producto'}</div>
+                          {subItems.length > 0 && (
+                            <div style={{ fontSize: '0.8rem', color: '#10b981', marginTop: '0.15rem', fontWeight: '600' }}>
+                              {subItems.map((sub, sIdx) => (
+                                <div key={sIdx}>- {sub}</div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          ${(parseFloat(prod.precio) * prod.cantidad).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -6259,6 +6100,73 @@ function App() {
         );
       })()}
       
+      {showDeleteModal && pedidoToDelete && (
+        <div className="custom-modal-overlay">
+          <div className="custom-modal-content" style={{ maxWidth: '440px', padding: '1.5rem', background: 'var(--modal-bg, #1e1e2e)', borderRadius: '16px', border: '1.5px solid rgba(239, 68, 68, 0.4)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '1.8rem' }}>🗑️</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ef4444', fontWeight: 'bold' }}>Eliminar Comanda</h3>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Requiere autorización del Administrador</p>
+              </div>
+            </div>
+
+            <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '0.85rem', borderRadius: '10px', border: '1px solid rgba(239, 68, 68, 0.25)', marginBottom: '1.25rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+              ¿Estás seguro de que deseas eliminar el <strong>Ticket #{pedidoToDelete.id}</strong> ({pedidoToDelete.cliente_nombre}) por un valor de <strong>${parseFloat(pedidoToDelete.total).toLocaleString('es-CL')}</strong>?
+              <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                ⚠️ Se recalculará el total diario y los ingredientes utilizados se devolverán al inventario.
+              </p>
+            </div>
+
+            <form onSubmit={handleConfirmDeletePedido} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="form-group">
+                <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>
+                  🔒 Contraseña de Administrador ({user?.nombre || 'Admin'})
+                </label>
+                <input
+                  type="password"
+                  className="form-input"
+                  placeholder="Ingresa la contraseña para autorizar"
+                  value={adminPasswordInput}
+                  onChange={(e) => setAdminPasswordInput(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              {errorDeleteModal && (
+                <div className="alert alert-error" style={{ margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.82rem' }}>
+                  <span>{errorDeleteModal}</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ flex: 1, padding: '0.6rem', fontSize: '0.88rem' }}
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setPedidoToDelete(null);
+                    setAdminPasswordInput('');
+                    setErrorDeleteModal('');
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-danger"
+                  disabled={loadingDeleteModal}
+                  style={{ flex: 1, padding: '0.6rem', fontSize: '0.88rem', background: '#ef4444', color: 'white', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                >
+                  {loadingDeleteModal ? 'Eliminando...' : 'Confirmar Eliminación'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {!user && (
         <button 
           type="button"

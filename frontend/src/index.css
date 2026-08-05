@@ -32,6 +32,8 @@
   --input-focus-bg: #ffffff;
   --btn-secondary-bg: rgba(255, 255, 255, 0.5);
   --btn-secondary-hover-bg: rgba(255, 255, 255, 0.85);
+  --dropdown-bg: #fffcf7;
+  --dropdown-shadow: 0 10px 25px rgba(70, 35, 10, 0.25), 0 4px 10px rgba(70, 35, 10, 0.15);
   
   /* Estilos del ticket de comanda */
   --ticket-bg: var(--glass-bg);
@@ -73,6 +75,8 @@ body.dark-theme {
   --input-focus-bg: rgba(0, 0, 0, 0.55);
   --btn-secondary-bg: rgba(255, 255, 255, 0.08);
   --btn-secondary-hover-bg: rgba(255, 255, 255, 0.18);
+  --dropdown-bg: #231209;
+  --dropdown-shadow: 0 12px 32px rgba(0, 0, 0, 0.85), 0 4px 12px rgba(0, 0, 0, 0.6);
   
   /* Estilos del ticket de comanda (se queda claro para mantener el estilo de ticket físico realista) */
   --ticket-bg: #fffbeb;

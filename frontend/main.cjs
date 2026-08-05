@@ -183,38 +183,83 @@ async function processPrintQueue() {
   }
 }
 
+function getPromoSubItems(p) {
+  if (!p) return [];
+  const subItems = [];
+
+  const getItemName = (item) => {
+    if (!item) return '';
+    if (typeof item === 'string') return item.trim();
+    return (
+      item.nombre_producto ||
+      item.nombre ||
+      item.nombre_opcion ||
+      item.producto_nombre ||
+      item.label ||
+      ''
+    ).trim();
+  };
+
+  // 1. Si vienen productos_incluidos (formato guardado en BD / historial)
+  if (p.productos_incluidos && Array.isArray(p.productos_incluidos) && p.productos_incluidos.length > 0) {
+    const agrupados = p.productos_incluidos.reduce((acc, opt) => {
+      const nom = getItemName(opt);
+      if (nom && nom !== 'undefined') {
+        const cant = parseInt(opt.cantidad) || 1;
+        if (!acc[nom]) {
+          acc[nom] = { nombre: nom, cantidad: 0 };
+        }
+        acc[nom].cantidad += cant;
+      }
+      return acc;
+    }, {});
+
+    Object.values(agrupados).forEach(group => {
+      const cantStr = group.cantidad > 1 ? `${group.cantidad}x ` : '';
+      subItems.push(`${cantStr}${group.nombre}`);
+    });
+  } else {
+    // 2. Productos fijos de la promoción
+    if (p.productos_fijos && Array.isArray(p.productos_fijos) && p.productos_fijos.length > 0) {
+      p.productos_fijos.forEach(pf => {
+        const nom = getItemName(pf);
+        if (nom && nom !== 'undefined') {
+          const cant = parseInt(pf.cantidad) || 1;
+          const cantStr = cant > 1 ? `${cant}x ` : '';
+          subItems.push(`${cantStr}${nom}`);
+        }
+      });
+    }
+
+    // 3. Opciones elegidas en los pasos de la promoción (agrupadas)
+    if (p.opciones_elegidas && Array.isArray(p.opciones_elegidas) && p.opciones_elegidas.length > 0) {
+      const agrupados = p.opciones_elegidas.reduce((acc, opt) => {
+        const nom = getItemName(opt);
+        if (nom && nom !== 'undefined') {
+          const cant = parseInt(opt.cantidad) || 1;
+          if (!acc[nom]) {
+            acc[nom] = { nombre: nom, cantidad: 0 };
+          }
+          acc[nom].cantidad += cant;
+        }
+        return acc;
+      }, {});
+
+      Object.values(agrupados).forEach(group => {
+        const cantStr = group.cantidad > 1 ? `${group.cantidad}x ` : '';
+        subItems.push(`${cantStr}${group.nombre}`);
+      });
+    }
+  }
+
+  return subItems.filter(str => str && !str.includes('undefined'));
+}
+
 function printTicketPromise(ticket) {
   return new Promise((resolve) => {
     try {
       const itemsRows = ticket.productos.map(p => {
-        let subItems = [];
-
-        // Productos fijos de la promoción
-        if (p.productos_fijos && p.productos_fijos.length > 0) {
-          p.productos_fijos.forEach(pf => {
-            const cantStr = pf.cantidad > 1 ? `${pf.cantidad}x ` : '';
-            subItems.push(`${cantStr}${pf.nombre}`);
-          });
-        }
-
-        // Opciones elegidas en los pasos de la promoción (agrupadas)
-        if (p.opciones_elegidas && p.opciones_elegidas.length > 0) {
-          const agrupados = p.opciones_elegidas.reduce((acc, opt) => {
-            const nombre = opt.nombre_producto || opt.nombre;
-            if (nombre) {
-              if (!acc[nombre]) {
-                acc[nombre] = { nombre_producto: nombre, cantidad: 0 };
-              }
-              acc[nombre].cantidad += 1;
-            }
-            return acc;
-          }, {});
-
-          Object.values(agrupados).forEach(group => {
-            const cantStr = group.cantidad > 1 ? `${group.cantidad}x ` : '';
-            subItems.push(`${cantStr}${group.nombre_producto}`);
-          });
-        }
+        const subItems = getPromoSubItems(p);
 
         const subItemsHtml = subItems.length > 0
           ? subItems.map(item => `
@@ -228,7 +273,7 @@ function printTicketPromise(ticket) {
           <tr>
             <td style="padding-left: 1mm; vertical-align: top;">${p.cantidad}</td>
             <td style="vertical-align: top;">
-              <div style="font-weight: bold;">${p.nombre}</div>
+              <div style="font-weight: bold;">${p.nombre || 'Producto'}</div>
               ${subItemsHtml}
             </td>
             <td style="text-align: right; vertical-align: top;">
@@ -707,6 +752,20 @@ function printReportPromise(report) {
             <span>$${totalVentasStr}</span>
           </div>
 
+          ${(report.comandas_eliminadas && report.comandas_eliminadas.length > 0) ? `
+            <div class="report-section-title" style="color: #dc2626 !important;">⚠️ COMANDAS ELIMINADAS (${report.comandas_eliminadas.length})</div>
+            <div class="report-summary-row" style="color: #dc2626 !important;">
+              <span>Total Anulado:</span>
+              <span>$${(report.monto_total_eliminado || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}</span>
+            </div>
+            ${report.comandas_eliminadas.map(c => `
+              <div style="font-size: 9.5px; border-bottom: 1px dotted #cccccc; padding: 0.5mm 0;">
+                #${c.id} - ${c.cliente_nombre} ($${(c.total || 0).toLocaleString('es-CL')})<br/>
+                <span style="font-size: 8.5px; opacity: 0.8;">Anuló: ${c.eliminado_por} (${c.hora_eliminado || ''})</span>
+              </div>
+            `).join('')}
+          ` : ''}
+
           ${report.has_arqueo ? `
             <div class="report-section-title">Arqueo de Caja</div>
             <div class="report-summary-row">
@@ -758,6 +817,16 @@ function printReportPromise(report) {
               </tr>
             </tbody>
           </table>
+
+          ${productosUnificadosRows ? `
+            <div class="report-section-title">Total Productos Vendidos (Directos + Promos)</div>
+            <div style="font-size: 9px; margin-top: 0.5mm; margin-bottom: 1mm; font-weight: normal;">Consolidado de unidades (${totalUnidadesCount} total):</div>
+            <table class="report-table">
+              <tbody>
+                ${productosUnificadosRows}
+              </tbody>
+            </table>
+          ` : ''}
 
           <div class="report-section-title">Materia Prima Gastada</div>
           <table class="report-table">
