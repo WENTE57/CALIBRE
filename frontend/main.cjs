@@ -614,322 +614,416 @@ function printTicketPromise(ticket) {
 function printReportPromise(report) {
   return new Promise((resolve) => {
     try {
-      const productosRows = (report.productos_vendidos || []).map(p => `
-        <tr>
-          <td style="width: 12%;">${p.cantidad_vendida}</td>
-          <td style="width: 58%;">${p.nombre_producto}</td>
-          <td style="width: 30%; text-align: right;">
-            $${(p.total_pesos || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-          </td>
-        </tr>
-      `).join('');
-
-      const envasesRow = (report.envases_vendidos && report.envases_vendidos.cantidad > 0) ? `
-        <tr>
-          <td style="width: 12%;">${report.envases_vendidos.cantidad}</td>
-          <td style="width: 58%;">Envases para llevar</td>
-          <td style="width: 30%; text-align: right;">
-            $${(report.envases_vendidos.total_pesos || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
-          </td>
-        </tr>
-      ` : '';
-
-      const totalEnvasesPesos = report.envases_vendidos ? (report.envases_vendidos.total_pesos || 0) : 0;
-      const totalProductosPesos = (report.productos_vendidos || []).reduce((acc, curr) => acc + (curr.total_pesos || 0), 0) + totalEnvasesPesos;
-      const totalProductosPesosStr = totalProductosPesos.toLocaleString('es-CL', { minimumFractionDigits: 0 });
-
-      // Organizar todos los productos vendidos (directos + promociones) en 2 columnas para ahorrar papel
-      const unificadosItems = report.productos_unificados || [];
-      const unificadosPairs = [];
-      for (let i = 0; i < unificadosItems.length; i += 2) {
-        const item1 = unificadosItems[i];
-        const item2 = unificadosItems[i + 1];
-        const col1 = item1 ? `<b>${item1.cantidad_total}</b> ${item1.nombre_producto}` : '';
-        const col2 = item2 ? `<b>${item2.cantidad_total}</b> ${item2.nombre_producto}` : '';
-        unificadosPairs.push(`
-          <tr>
-            <td style="width: 50%; padding: 0.3mm 1mm 0.3mm 0; word-break: break-word; font-size: 9.5px; border-bottom: none;">${col1}</td>
-            <td style="width: 50%; padding: 0.3mm 0 0.3mm 1mm; word-break: break-word; font-size: 9.5px; border-bottom: none;">${col2}</td>
-          </tr>
-        `);
-      }
-      const productosUnificadosRows = unificadosPairs.join('');
-      const totalUnidadesCount = unificadosItems.reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0);
-
-      const ingredientesRows = (report.ingredientes_gastados || []).map(ing => `
-        <tr>
-          <td>${ing.ingrediente_nombre}</td>
-          <td style="text-align: right;">${parseFloat(ing.cantidad_gastada).toLocaleString('es-CL', { maximumFractionDigits: 2 })}</td>
-        </tr>
-      `).join('');
-
-      const inventarioRows = (report.inventario_actual || []).map(ing => `
-        <tr>
-          <td>${ing.nombre}</td>
-          <td style="text-align: right;">${parseFloat(ing.stock).toLocaleString('es-CL', { maximumFractionDigits: 2 })}</td>
-        </tr>
-      `).join('');
-
       const fechaStr = new Date(report.fecha + 'T12:00:00').toLocaleDateString('es-CL');
       const impresoFecha = new Date().toLocaleDateString('es-CL');
       const impresoHora = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
 
-      const totalVentasStr = parseFloat(report.total_ventas || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
-      const totalEfectivoStr = parseFloat(report.total_efectivo || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
-      const totalDebitoStr = parseFloat(report.total_debito || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
-      const totalCreditoStr = parseFloat(report.total_credito || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+      let html = '';
 
-      const fondoAperturaStr = parseFloat(report.fondo_apertura || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
-      const efectivoRealStr = parseFloat(report.efectivo_real || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
-      const efectivoEsperadoStr = (parseFloat(report.total_efectivo || 0) + parseFloat(report.fondo_apertura || 0)).toLocaleString('es-CL', { minimumFractionDigits: 0 });
-      const diferenciaStr = (report.diferencia >= 0 ? '+' : '') + parseFloat(report.diferencia || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+      if (report.tipo_reporte === 'consolidado') {
+        const unificadosItems = report.productos_unificados || [];
+        const unificadosPairs = [];
+        for (let i = 0; i < unificadosItems.length; i += 2) {
+          const item1 = unificadosItems[i];
+          const item2 = unificadosItems[i + 1];
+          const col1 = item1 ? `<b>${item1.cantidad_total}</b> ${item1.nombre_producto}` : '';
+          const col2 = item2 ? `<b>${item2.cantidad_total}</b> ${item2.nombre_producto}` : '';
+          unificadosPairs.push(`
+            <tr>
+              <td style="width: 50%; padding: 0.4mm 1mm 0.4mm 0; word-break: break-word; font-size: 11px; border-bottom: none;">${col1}</td>
+              <td style="width: 50%; padding: 0.4mm 0 0.4mm 1mm; word-break: break-word; font-size: 11px; border-bottom: none;">${col2}</td>
+            </tr>
+          `);
+        }
+        const productosUnificadosRows = unificadosPairs.join('');
+        const totalUnidadesCount = unificadosItems.reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0);
 
-      const html = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            @page {
-              size: 76mm 297mm;
-              margin: 0;
-            }
-            * {
-              box-sizing: border-box !important;
-              color: #000000 !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-              font-weight: bold !important;
-            }
-            html, body {
-              width: 68mm;
-              max-width: 68mm;
-              margin: 0 auto;
-              padding: 1mm 1mm 5mm 1mm;
-              font-family: 'Courier New', Courier, monospace;
-              font-size: 11px;
-              background-color: #ffffff !important;
-              line-height: 1.2;
-              overflow: hidden;
-              word-wrap: break-word;
-              overflow-wrap: break-word;
-            }
-            .text-center { text-align: center; }
-            .text-right { text-align: right; }
-            .bold { font-weight: bold; }
-            
-            .report-header {
-              text-align: center;
-              border-bottom: 1.5px dashed #000000;
-              padding-bottom: 1mm;
-              margin-bottom: 1.5mm;
-            }
-            .report-title {
-              font-size: 15px;
-              font-weight: bold;
-              margin: 0 0 0.5mm 0;
-              text-transform: uppercase;
-              letter-spacing: 0.3px;
-              word-break: break-word;
-            }
-            .report-date-time {
-              font-size: 10px;
-              margin-top: 0.5mm;
-            }
-            .report-section-title {
-              font-size: 11px;
-              font-weight: bold;
-              border-bottom: 1.2px solid #000000;
-              padding: 0.5mm 0;
-              margin-top: 2mm;
-              margin-bottom: 1mm;
-              text-transform: uppercase;
-            }
-            .report-table {
-              width: 100%;
-              table-layout: fixed;
-              border-collapse: collapse;
-              font-size: 10px;
-            }
-            .report-table td {
-              padding: 0.4mm 0;
-              border-bottom: 1px dotted #dddddd;
-              word-break: break-word;
-              overflow-wrap: break-word;
-            }
-            .report-table th {
-              border-bottom: 1.2px solid #000000;
-              padding: 0.5mm 0;
-              text-align: left;
-              font-size: 10px;
-              font-weight: bold;
-            }
-            .report-summary-row {
-              display: flex;
-              justify-content: space-between;
-              padding: 0.4mm 0;
-              border-bottom: 1px dotted #dddddd;
-              width: 100%;
-              font-size: 10px;
-            }
-            .report-summary-row.total {
-              border-top: 1.2px solid #000000;
-              border-bottom: 1.2px solid #000000;
-              padding: 1mm 0;
-              font-size: 12px;
-              margin-top: 0.5mm;
-              font-weight: bold;
-            }
-            .cierre-status {
-              padding: 1mm;
-              border: 1px dashed #000000;
-              margin-top: 1.5mm;
-              text-align: center;
-              font-size: 11px;
-              font-weight: bold;
-              word-break: break-word;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="report-header">
-            <h2 class="report-title">REPORTE DE CIERRE</h2>
-            <div style="font-size: 11px;">Calibre 25</div>
-            <div class="report-date-time">
-              Fecha Cierre: ${fechaStr}<br/>
-              Impreso: ${impresoFecha} ${impresoHora}
-            </div>
-          </div>
-
-          <div class="report-section-title">Resumen Financiero</div>
-          <div class="report-summary-row">
-            <span>Efectivo Ventas:</span>
-            <span>$${totalEfectivoStr}</span>
-          </div>
-          <div class="report-summary-row">
-            <span>Débito Ventas:</span>
-            <span>$${totalDebitoStr}</span>
-          </div>
-          <div class="report-summary-row">
-            <span>Crédito Ventas:</span>
-            <span>$${totalCreditoStr}</span>
-          </div>
-          <div class="report-summary-row total">
-            <span>VENTAS TOTALES:</span>
-            <span>$${totalVentasStr}</span>
-          </div>
-
-          ${(report.comandas_eliminadas && report.comandas_eliminadas.length > 0) ? `
-            <div class="report-section-title" style="color: #dc2626 !important;">⚠️ COMANDAS ELIMINADAS (${report.comandas_eliminadas.length})</div>
-            <div class="report-summary-row" style="color: #dc2626 !important;">
-              <span>Total Anulado:</span>
-              <span>$${(report.monto_total_eliminado || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}</span>
-            </div>
-            ${report.comandas_eliminadas.map(c => `
-              <div style="font-size: 9.5px; border-bottom: 1px dotted #cccccc; padding: 0.5mm 0;">
-                #${c.id} - ${c.cliente_nombre} ($${(c.total || 0).toLocaleString('es-CL')})<br/>
-                <span style="font-size: 8.5px; opacity: 0.8;">Anuló: ${c.eliminado_por} (${c.hora_eliminado || ''})</span>
+        html = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              @page {
+                size: 76mm 297mm;
+                margin: 0;
+              }
+              * {
+                box-sizing: border-box !important;
+                color: #000000 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                font-weight: bold !important;
+              }
+              html, body {
+                width: 68mm;
+                max-width: 68mm;
+                margin: 0 auto;
+                padding: 1mm 1mm 5mm 1mm;
+                font-family: 'Courier New', Courier, monospace;
+                font-size: 11px;
+                background-color: #ffffff !important;
+                line-height: 1.2;
+                overflow: hidden;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+              }
+              .text-center { text-align: center; }
+              .text-right { text-align: right; }
+              .bold { font-weight: bold; }
+              
+              .report-header {
+                text-align: center;
+                border-bottom: 1.5px dashed #000000;
+                padding-bottom: 1mm;
+                margin-bottom: 1.5mm;
+              }
+              .report-title {
+                font-size: 14px;
+                font-weight: bold;
+                margin: 0 0 0.5mm 0;
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+                word-break: break-word;
+              }
+              .report-date-time {
+                font-size: 10px;
+                margin-top: 0.5mm;
+              }
+              .report-section-title {
+                font-size: 11px;
+                font-weight: bold;
+                border-bottom: 1.2px solid #000000;
+                padding: 0.5mm 0;
+                margin-top: 2mm;
+                margin-bottom: 1mm;
+                text-transform: uppercase;
+              }
+              .report-table {
+                width: 100%;
+                table-layout: fixed;
+                border-collapse: collapse;
+                font-size: 11px;
+              }
+              .report-table td {
+                padding: 0.6mm 0;
+                border-bottom: 1px dotted #dddddd;
+                word-break: break-word;
+                overflow-wrap: break-word;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="report-header">
+              <h2 class="report-title">CONSOLIDADO DE VENTAS</h2>
+              <div style="font-size: 11px;">Calibre 25</div>
+              <div class="report-date-time">
+                Fecha Cierre: ${fechaStr}<br/>
+                Impreso: ${impresoFecha} ${impresoHora}
               </div>
-            `).join('')}
-          ` : ''}
+            </div>
 
-          ${report.has_arqueo ? `
-            <div class="report-section-title">Arqueo de Caja</div>
-            <div class="report-summary-row">
-              <span>Cerrado por:</span>
-              <span>${report.cargado_por}</span>
-            </div>
-            <div class="report-summary-row">
-              <span>Fondo Apertura:</span>
-              <span>$${fondoAperturaStr}</span>
-            </div>
-            <div class="report-summary-row">
-              <span>Efectivo Esperado:</span>
-              <span>$${efectivoEsperadoStr}</span>
-            </div>
-            <div class="report-summary-row">
-              <span>Efectivo Real:</span>
-              <span>$${efectivoRealStr}</span>
-            </div>
-            <div class="cierre-status">
-              DIFERENCIA: $${diferenciaStr}<br/>
-              (${report.diferencia === 0 ? 'CAJA CUADRADA' : report.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE'})
-            </div>
-            ${report.observaciones ? `
-              <div style="margin-top: 1.5mm; font-size: 10px; font-style: italic; border: 1px dashed #cccccc; padding: 1mm; word-break: break-word;">
-                Obs: "${report.observaciones}"
-              </div>
-            ` : ''}
-          ` : `
-            <div class="cierre-status" style="border-color: #dc2626; color: #dc2626;">
-              CAJA NO CUADRADA AÚN
-            </div>
-          `}
-
-          <div class="report-section-title">Productos y Envases Vendidos</div>
-          <table class="report-table">
-            <thead>
-              <tr>
-                <th style="width: 12%;">Cant</th>
-                <th style="width: 58%;">Detalle</th>
-                <th style="width: 30%; text-align: right;">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${productosRows}
-              ${envasesRow}
-              <tr style="border-top: 1.2px solid #000000; font-weight: bold;">
-                <td colspan="2" style="padding-top: 1mm; padding-bottom: 0.5mm;">TOTAL COBRADO:</td>
-                <td style="text-align: right; padding-top: 1mm; padding-bottom: 0.5mm;">$${totalProductosPesosStr}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          ${productosUnificadosRows ? `
-            <div class="report-section-title">Total Productos Vendidos (Directos + Promos)</div>
-            <div style="font-size: 9px; margin-top: 0.5mm; margin-bottom: 1mm; font-weight: normal;">Consolidado de unidades (${totalUnidadesCount} total):</div>
+            <div class="report-section-title">Total Productos (Directos + Promos)</div>
+            <div style="font-size: 10px; margin-top: 0.5mm; margin-bottom: 1.5mm; font-weight: normal;">Consolidado de unidades (${totalUnidadesCount} total):</div>
             <table class="report-table">
               <tbody>
                 ${productosUnificadosRows}
               </tbody>
             </table>
-          ` : ''}
 
-          <div class="report-section-title">Materia Prima Gastada</div>
-          <table class="report-table">
-            <thead>
-              <tr>
-                <th style="width: 70%;">Ingrediente</th>
-                <th style="width: 30%; text-align: right;">Cant</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${ingredientesRows}
-            </tbody>
-          </table>
+            <div class="text-center" style="font-size: 11px; margin-top: 5mm; border-top: 1px dashed #000000; padding-top: 2mm;">
+              <p style="margin: 2px 0;">Calibre 25 - Gestión de Caja</p>
+            </div>
+            <div style="height: 12mm;"></div>
+          </body>
+          </html>
+        `;
+      } else {
+        const productosRows = (report.productos_vendidos || []).map(p => `
+          <tr>
+            <td style="width: 12%;">${p.cantidad_vendida}</td>
+            <td style="width: 58%;">${p.nombre_producto}</td>
+            <td style="width: 30%; text-align: right;">
+              $${(p.total_pesos || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+            </td>
+          </tr>
+        `).join('');
 
-          ${inventarioRows ? `
-            <div class="report-section-title">Inventario Actual</div>
+        const envasesRow = (report.envases_vendidos && report.envases_vendidos.cantidad > 0) ? `
+          <tr>
+            <td style="width: 12%;">${report.envases_vendidos.cantidad}</td>
+            <td style="width: 58%;">Envases para llevar</td>
+            <td style="width: 30%; text-align: right;">
+              $${(report.envases_vendidos.total_pesos || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+            </td>
+          </tr>
+        ` : '';
+
+        const totalEnvasesPesos = report.envases_vendidos ? (report.envases_vendidos.total_pesos || 0) : 0;
+        const totalProductosPesos = (report.productos_vendidos || []).reduce((acc, curr) => acc + (curr.total_pesos || 0), 0) + totalEnvasesPesos;
+        const totalProductosPesosStr = totalProductosPesos.toLocaleString('es-CL', { minimumFractionDigits: 0 });
+
+        const ingredientesRows = (report.ingredientes_gastados || []).map(ing => `
+          <tr>
+            <td>${ing.ingrediente_nombre}</td>
+            <td style="text-align: right;">${parseFloat(ing.cantidad_gastada).toLocaleString('es-CL', { maximumFractionDigits: 2 })}</td>
+          </tr>
+        `).join('');
+
+        const inventarioRows = (report.inventario_actual || []).map(ing => `
+          <tr>
+            <td>${ing.nombre}</td>
+            <td style="text-align: right;">${parseFloat(ing.stock).toLocaleString('es-CL', { maximumFractionDigits: 2 })}</td>
+          </tr>
+        `).join('');
+
+        const totalVentasStr = parseFloat(report.total_ventas || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+        const totalEfectivoStr = parseFloat(report.total_efectivo || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+        const totalDebitoStr = parseFloat(report.total_debito || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+        const totalCreditoStr = parseFloat(report.total_credito || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+
+        const fondoAperturaStr = parseFloat(report.fondo_apertura || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+        const efectivoRealStr = parseFloat(report.efectivo_real || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+        const efectivoEsperadoStr = (parseFloat(report.total_efectivo || 0) + parseFloat(report.fondo_apertura || 0)).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+        const diferenciaStr = (report.diferencia >= 0 ? '+' : '') + parseFloat(report.diferencia || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 });
+
+        html = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              @page {
+                size: 76mm 297mm;
+                margin: 0;
+              }
+              * {
+                box-sizing: border-box !important;
+                color: #000000 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                font-weight: bold !important;
+              }
+              html, body {
+                width: 68mm;
+                max-width: 68mm;
+                margin: 0 auto;
+                padding: 1mm 1mm 5mm 1mm;
+                font-family: 'Courier New', Courier, monospace;
+                font-size: 11px;
+                background-color: #ffffff !important;
+                line-height: 1.2;
+                overflow: hidden;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+              }
+              .text-center { text-align: center; }
+              .text-right { text-align: right; }
+              .bold { font-weight: bold; }
+              
+              .report-header {
+                text-align: center;
+                border-bottom: 1.5px dashed #000000;
+                padding-bottom: 1mm;
+                margin-bottom: 1.5mm;
+              }
+              .report-title {
+                font-size: 15px;
+                font-weight: bold;
+                margin: 0 0 0.5mm 0;
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+                word-break: break-word;
+              }
+              .report-date-time {
+                font-size: 10px;
+                margin-top: 0.5mm;
+              }
+              .report-section-title {
+                font-size: 11px;
+                font-weight: bold;
+                border-bottom: 1.2px solid #000000;
+                padding: 0.5mm 0;
+                margin-top: 2mm;
+                margin-bottom: 1mm;
+                text-transform: uppercase;
+              }
+              .report-table {
+                width: 100%;
+                table-layout: fixed;
+                border-collapse: collapse;
+                font-size: 10px;
+              }
+              .report-table td {
+                padding: 0.4mm 0;
+                border-bottom: 1px dotted #dddddd;
+                word-break: break-word;
+                overflow-wrap: break-word;
+              }
+              .report-table th {
+                border-bottom: 1.2px solid #000000;
+                padding: 0.5mm 0;
+                text-align: left;
+                font-size: 10px;
+                font-weight: bold;
+              }
+              .report-summary-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 0.4mm 0;
+                border-bottom: 1px dotted #dddddd;
+                width: 100%;
+                font-size: 10px;
+              }
+              .report-summary-row.total {
+                border-top: 1.2px solid #000000;
+                border-bottom: 1.2px solid #000000;
+                padding: 1mm 0;
+                font-size: 12px;
+                margin-top: 0.5mm;
+                font-weight: bold;
+              }
+              .cierre-status {
+                padding: 1mm;
+                border: 1px dashed #000000;
+                margin-top: 1.5mm;
+                text-align: center;
+                font-size: 11px;
+                font-weight: bold;
+                word-break: break-word;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="report-header">
+              <h2 class="report-title">REPORTE DE CIERRE</h2>
+              <div style="font-size: 11px;">Calibre 25</div>
+              <div class="report-date-time">
+                Fecha Cierre: ${fechaStr}<br/>
+                Impreso: ${impresoFecha} ${impresoHora}
+              </div>
+            </div>
+
+            <div class="report-section-title">Resumen Financiero</div>
+            <div class="report-summary-row">
+              <span>Efectivo Ventas:</span>
+              <span>$${totalEfectivoStr}</span>
+            </div>
+            <div class="report-summary-row">
+              <span>Débito Ventas:</span>
+              <span>$${totalDebitoStr}</span>
+            </div>
+            <div class="report-summary-row">
+              <span>Crédito Ventas:</span>
+              <span>$${totalCreditoStr}</span>
+            </div>
+            <div class="report-summary-row total">
+              <span>VENTAS TOTALES:</span>
+              <span>$${totalVentasStr}</span>
+            </div>
+
+            ${(report.comandas_eliminadas && report.comandas_eliminadas.length > 0) ? `
+              <div class="report-section-title" style="color: #dc2626 !important;">⚠️ COMANDAS ELIMINADAS (${report.comandas_eliminadas.length})</div>
+              <div class="report-summary-row" style="color: #dc2626 !important;">
+                <span>Total Anulado:</span>
+                <span>$${(report.monto_total_eliminado || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}</span>
+              </div>
+              ${report.comandas_eliminadas.map(c => `
+                <div style="font-size: 9.5px; border-bottom: 1px dotted #cccccc; padding: 0.5mm 0;">
+                  #${c.id} - ${c.cliente_nombre} ($${(c.total || 0).toLocaleString('es-CL')})<br/>
+                  <span style="font-size: 8.5px; opacity: 0.8;">Anuló: ${c.eliminado_por} (${c.hora_eliminado || ''})</span>
+                </div>
+              `).join('')}
+            ` : ''}
+
+            ${report.has_arqueo ? `
+              <div class="report-section-title">Arqueo de Caja</div>
+              <div class="report-summary-row">
+                <span>Cerrado por:</span>
+                <span>${report.cargado_por}</span>
+              </div>
+              <div class="report-summary-row">
+                <span>Fondo Apertura:</span>
+                <span>$${fondoAperturaStr}</span>
+              </div>
+              <div class="report-summary-row">
+                <span>Efectivo Esperado:</span>
+                <span>$${efectivoEsperadoStr}</span>
+              </div>
+              <div class="report-summary-row">
+                <span>Efectivo Real:</span>
+                <span>$${efectivoRealStr}</span>
+              </div>
+              <div class="cierre-status">
+                DIFERENCIA: $${diferenciaStr}<br/>
+                (${report.diferencia === 0 ? 'CAJA CUADRADA' : report.diferencia > 0 ? 'SOBRANTE' : 'FALTANTE'})
+              </div>
+              ${report.observaciones ? `
+                <div style="margin-top: 1.5mm; font-size: 10px; font-style: italic; border: 1px dashed #cccccc; padding: 1mm; word-break: break-word;">
+                  Obs: "${report.observaciones}"
+                </div>
+              ` : ''}
+            ` : `
+              <div class="cierre-status" style="border-color: #dc2626; color: #dc2626;">
+                CAJA NO CUADRADA AÚN
+              </div>
+            `}
+
+            <div class="report-section-title">Productos y Envases Vendidos</div>
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th style="width: 12%;">Cant</th>
+                  <th style="width: 58%;">Detalle</th>
+                  <th style="width: 30%; text-align: right;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${productosRows}
+                ${envasesRow}
+                <tr style="border-top: 1.2px solid #000000; font-weight: bold;">
+                  <td colspan="2" style="padding-top: 1mm; padding-bottom: 0.5mm;">TOTAL COBRADO:</td>
+                  <td style="text-align: right; padding-top: 1mm; padding-bottom: 0.5mm;">$${totalProductosPesosStr}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="report-section-title">Materia Prima Gastada</div>
             <table class="report-table">
               <thead>
                 <tr>
                   <th style="width: 70%;">Ingrediente</th>
-                  <th style="width: 30%; text-align: right;">Stock</th>
+                  <th style="width: 30%; text-align: right;">Cant</th>
                 </tr>
               </thead>
               <tbody>
-                ${inventarioRows}
+                ${ingredientesRows}
               </tbody>
             </table>
-          ` : ''}
 
-          <div class="text-center" style="font-size: 11px; margin-top: 5mm; border-top: 1px dashed #000000; padding-top: 2mm;">
-            <p style="margin: 2px 0;">Calibre 25 - Gestión de Caja</p>
-          </div>
-          <div style="height: 12mm;"></div>
-        </body>
-        </html>
-      `;
+            ${inventarioRows ? `
+              <div class="report-section-title">Inventario Actual</div>
+              <table class="report-table">
+                <thead>
+                  <tr>
+                    <th style="width: 70%;">Ingrediente</th>
+                    <th style="width: 30%; text-align: right;">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${inventarioRows}
+                </tbody>
+              </table>
+            ` : ''}
+
+            <div class="text-center" style="font-size: 11px; margin-top: 5mm; border-top: 1px dashed #000000; padding-top: 2mm;">
+              <p style="margin: 2px 0;">Calibre 25 - Gestión de Caja</p>
+            </div>
+            <div style="height: 12mm;"></div>
+          </body>
+          </html>
+        `;
+      }
 
       const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 

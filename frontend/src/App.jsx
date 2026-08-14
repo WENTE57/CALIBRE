@@ -4927,35 +4927,51 @@ function App() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                         <h4 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>📅 Cierre Diario</h4>
                         {cierreData && window.electronAPI && (
-                          <button
-                            type="button"
-                            className="btn-secondary"
-                            style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', height: '32px' }}
-                            onClick={() => {
-                              window.electronAPI.printReport({
-                                fecha: fechaCierre,
-                                total_ventas: cierreData.total_ventas,
-                                total_efectivo: cierreData.total_efectivo,
-                                total_debito: cierreData.total_debito,
-                                total_credito: cierreData.total_credito,
-                                total_tarjeta: cierreData.total_tarjeta,
-                                productos_vendidos: cierreData.productos_vendidos,
-                                envases_vendidos: cierreData.envases_vendidos,
-                                productos_promociones: cierreData.productos_promociones,
-                                productos_unificados: cierreData.productos_unificados,
-                                ingredientes_gastados: cierreData.ingredientes_gastados,
-                                has_arqueo: !!cierreRegistradoData,
-                                cargado_por: cierreRegistradoData ? cierreRegistradoData.cargado_por : '',
-                                fondo_apertura: cierreRegistradoData ? cierreRegistradoData.fondo_apertura : 0,
-                                efectivo_real: cierreRegistradoData ? cierreRegistradoData.efectivo_real : 0,
-                                diferencia: cierreRegistradoData ? cierreRegistradoData.diferencia : 0,
-                                observaciones: cierreRegistradoData ? cierreRegistradoData.observaciones : '',
-                                inventario_actual: listaIngredientes
-                              });
-                            }}
-                          >
-                            🖨️ Imprimir Reporte
-                          </button>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', height: '32px' }}
+                              onClick={() => {
+                                window.electronAPI.printReport({
+                                  fecha: fechaCierre,
+                                  total_ventas: cierreData.total_ventas,
+                                  total_efectivo: cierreData.total_efectivo,
+                                  total_debito: cierreData.total_debito,
+                                  total_credito: cierreData.total_credito,
+                                  total_tarjeta: cierreData.total_tarjeta,
+                                  productos_vendidos: cierreData.productos_vendidos,
+                                  envases_vendidos: cierreData.envases_vendidos,
+                                  productos_promociones: cierreData.productos_promociones,
+                                  ingredientes_gastados: cierreData.ingredientes_gastados,
+                                  has_arqueo: !!cierreRegistradoData,
+                                  cargado_por: cierreRegistradoData ? cierreRegistradoData.cargado_por : '',
+                                  fondo_apertura: cierreRegistradoData ? cierreRegistradoData.fondo_apertura : 0,
+                                  efectivo_real: cierreRegistradoData ? cierreRegistradoData.efectivo_real : 0,
+                                  diferencia: cierreRegistradoData ? cierreRegistradoData.diferencia : 0,
+                                  observaciones: cierreRegistradoData ? cierreRegistradoData.observaciones : '',
+                                  inventario_actual: listaIngredientes
+                                });
+                              }}
+                            >
+                              🖨️ Reporte de Cierre
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', height: '32px' }}
+                              onClick={() => {
+                                window.electronAPI.printReport({
+                                  fecha: fechaCierre,
+                                  tipo_reporte: 'consolidado',
+                                  productos_unificados: cierreData.productos_unificados
+                                });
+                              }}
+                            >
+                              📦 Reporte de Productos
+                            </button>
+                          </div>
                         )}
                       </div>
                       
