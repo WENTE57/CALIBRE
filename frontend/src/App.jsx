@@ -144,9 +144,14 @@ const getPromoSubItems = (item) => {
     ).trim();
   };
 
+  let prodsIncl = item.productos_incluidos;
+  if (typeof prodsIncl === 'string') {
+    try { prodsIncl = JSON.parse(prodsIncl); } catch (e) {}
+  }
+
   // 1. Si vienen productos_incluidos (formato procesado por backend / BD)
-  if (item.productos_incluidos && Array.isArray(item.productos_incluidos) && item.productos_incluidos.length > 0) {
-    const agrupados = item.productos_incluidos.reduce((acc, opt) => {
+  if (prodsIncl && Array.isArray(prodsIncl) && prodsIncl.length > 0) {
+    const agrupados = prodsIncl.reduce((acc, opt) => {
       const nom = getItemName(opt);
       if (nom && nom !== 'undefined') {
         const cant = parseInt(opt.cantidad) || 1;
@@ -329,6 +334,7 @@ function App() {
   const [comandaData, setComandaData] = useState(null);
   const [historialPedidos, setHistorialPedidos] = useState([]);
   const [loadingHistorial, setLoadingHistorial] = useState(false);
+  const [subTabHistorial, setSubTabHistorial] = useState('activas'); // 'activas' o 'eliminadas'
 
   // Estados para eliminación de comanda con contraseña de Administrador
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -368,7 +374,7 @@ function App() {
       setAdminPasswordInput('');
       setErrorDeleteModal('');
 
-      cargarHistorialPedidos();
+      cargarHistorial();
       cargarIngredientes();
       if (typeof cargarCierreCaja === 'function') {
         cargarCierreCaja();
@@ -456,6 +462,21 @@ function App() {
   const [promocionesError, setPromocionesError] = useState('');
   const [promoNombre, setPromoNombre] = useState('');
   const [promoEmoji, setPromoEmoji] = useState('🎁');
+
+  // Estados para el Sistema de Turnos
+  const [activeShift, setActiveShift] = useState(null);
+  const [showShiftPrompt, setShowShiftPrompt] = useState(false);
+  const [listaTurnos, setListaTurnos] = useState([]);
+  const [loadingTurnos, setLoadingTurnos] = useState(false);
+  const [filtroTurnoCierre, setFiltroTurnoCierre] = useState('all');
+  const [filtroTurnoHistorial, setFiltroTurnoHistorial] = useState('all');
+  const [efectivoInicialInput, setEfectivoInicialInput] = useState('');
+  const [efectivoFinalInput, setEfectivoFinalInput] = useState('');
+  const [showCerrarTurnoPrompt, setShowCerrarTurnoPrompt] = useState(false);
+  const [errorShiftInput, setErrorShiftInput] = useState('');
+  const [errorCerrarShiftInput, setErrorCerrarShiftInput] = useState('');
+  const [observacionesCerrarShiftInput, setObservacionesCerrarShiftInput] = useState('');
+  const [activeShiftSalesInfo, setActiveShiftSalesInfo] = useState(null);
 
   // Estados para configuración y cobro de envases para llevar
   const [precioEnvase, setPrecioEnvase] = useState(300);
@@ -636,16 +657,40 @@ function App() {
     setShowPromoSelectorModal(true);
   };
 
+  // Funciones auxiliares para la contabilidad del producto Envase
+  const isEnvaseProduct = (item) => {
+    if (!item || !item.nombre) return false;
+    const name = item.nombre.toLowerCase().trim();
+    return name === 'envase para llevar' || name === 'envases para llevar' || name === 'envase';
+  };
+
+  const getEnvaseProductsQty = (itemsPedido = pedido) => {
+    return itemsPedido
+      .filter(isEnvaseProduct)
+      .reduce((acc, curr) => acc + (parseInt(curr.cantidad) || 0), 0);
+  };
+
+  const calcularSubtotalProductos = (itemsPedido = pedido) => {
+    return itemsPedido
+      .filter(item => !isEnvaseProduct(item))
+      .reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+  };
+
   // Función para calcular la cantidad y el costo total de envases para llevar
   const calcularEnvases = (itemsPedido = pedido, entrega = tipoEntrega) => {
     const unitPrice = parseFloat(precioEnvase) || 0;
+    const envasesFromProducts = getEnvaseProductsQty(itemsPedido);
 
     if (entrega !== 'Llevar') {
-      return { cantidadTotal: 0, montoTotal: 0, unitPrice, cantidadAuto: 0 };
+      const cantidadTotal = envasesFromProducts;
+      const montoTotal = cantidadTotal * unitPrice;
+      return { cantidadTotal, montoTotal, unitPrice, cantidadAuto: 0 };
     }
 
     let cantidadAuto = 0;
     for (const item of itemsPedido) {
+      if (isEnvaseProduct(item)) continue;
+
       if (item.promocion_id || (typeof item.id === 'string' && item.id.startsWith('promo-'))) {
         const promoRef = promociones.find(p => p.id === item.promocion_id) || item;
         const aplica = promoRef.aplica_envase || 'no';
@@ -669,7 +714,8 @@ function App() {
       }
     }
 
-    const cantidadTotal = envasesCantidadOverride !== null ? envasesCantidadOverride : cantidadAuto;
+    const baseCantidad = envasesCantidadOverride !== null ? envasesCantidadOverride : (cantidadAuto + envasesFromProducts);
+    const cantidadTotal = baseCantidad;
     const montoTotal = cantidadTotal * unitPrice;
     return { cantidadTotal, montoTotal, unitPrice, cantidadAuto };
   };
@@ -1044,6 +1090,103 @@ function App() {
         }
       }
     );
+  };
+
+  const verificarTurnoActivo = async (mostrarPromptAlIniciar = false) => {
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/turnos/activo');
+      const data = await response.json();
+      if (response.ok && data.success) {
+        if (data.activo) {
+          setActiveShift(data.turno);
+          if (mostrarPromptAlIniciar) {
+            abrirAlerta(`Se continuará trabajando en el Turno #${data.turno.id} activo, iniciado por ${data.turno.usuario_inicio} el ${new Date(data.turno.fecha_hora_inicio).toLocaleDateString('es-CL')} a las ${new Date(data.turno.fecha_hora_inicio).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}.`, 'Turno Activo Detectado');
+            setShowShiftPrompt(false);
+          }
+        } else {
+          setActiveShift(null);
+          if (mostrarPromptAlIniciar) {
+            setShowShiftPrompt(true);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error al verificar turno activo:', err);
+      if (mostrarPromptAlIniciar) {
+        setShowShiftPrompt(true);
+      }
+    }
+  };
+
+  const iniciarTurno = async (username, efectivoInicialVal) => {
+    const userToStart = username || (user ? user.nombre : 'Desconocido');
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/turnos/iniciar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          usuario_inicio: userToStart,
+          efectivo_inicial: parseFloat(efectivoInicialVal)
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setActiveShift(data.turno);
+        abrirAlerta('Se ha iniciado un nuevo turno correctamente.', 'Turno Iniciado');
+        cargarHistorialTurnos();
+      } else {
+        abrirAlerta(data.message || 'Error al iniciar el turno.', 'Error');
+      }
+    } catch (err) {
+      console.error('Error al iniciar turno:', err);
+      abrirAlerta('Error de red al intentar iniciar el turno.', 'Error de Conexión');
+    }
+  };
+
+  const cerrarTurno = async (efectivoFinalVal, observacionesVal) => {
+    const userToClose = user ? user.nombre : 'Desconocido';
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/turnos/cerrar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          usuario_fin: userToClose,
+          efectivo_final: parseFloat(efectivoFinalVal),
+          observaciones: observacionesVal || ''
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setActiveShift(null);
+        abrirAlerta('Se ha cerrado el turno actual con éxito.', 'Turno Cerrado');
+        cargarHistorialTurnos();
+        verificarTurnoActivo(true);
+      } else {
+        abrirAlerta(data.message || 'Error al cerrar el turno.', 'Error');
+      }
+    } catch (err) {
+      console.error('Error al cerrar turno:', err);
+      abrirAlerta('Error de red al intentar cerrar el turno.', 'Error de Conexión');
+    }
+  };
+
+  const cargarHistorialTurnos = async () => {
+    setLoadingTurnos(true);
+    try {
+      const response = await fetch('http://127.0.0.1:5000/api/turnos');
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setListaTurnos(data.turnos || []);
+      }
+    } catch (err) {
+      console.error('Error al cargar historial de turnos:', err);
+    } finally {
+      setLoadingTurnos(false);
+    }
   };
 
   const cargarConfiguracion = async () => {
@@ -1821,6 +1964,8 @@ function App() {
       cargarProductos();
       cargarCategorias();
       cargarPromociones();
+      cargarConfiguracion();
+      verificarTurnoActivo(true);
     }
   }, [user]);
 
@@ -1833,13 +1978,16 @@ function App() {
 
 
   useEffect(() => {
-    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre' || activeTab === 'promociones')) {
+    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre' || activeTab === 'promociones' || activeTab === 'configuraciones')) {
       cargarIngredientes();
       cargarCategorias();
       cargarProductos();
       cargarPromociones();
-      if (activeTab === 'cierre') {
+      if (activeTab === 'cierre' || activeTab === 'configuraciones') {
         cargarConfiguracion();
+        if (activeTab === 'cierre') {
+          cargarHistorialTurnos();
+        }
       }
     }
   }, [user, activeTab]);
@@ -1849,7 +1997,7 @@ function App() {
     setCatProductView('list');
   }, [activeTab]);
 
-  const cargarCuadradoCaja = async (dateStr) => {
+  const cargarCuadradoCaja = async (dateStr, efectivoSugerido) => {
     const targetDate = dateStr || fechaCierre;
     if (!targetDate) return;
     try {
@@ -1864,6 +2012,7 @@ function App() {
           setModoEdicionCierre(false);
         } else {
           setCierreRegistradoData(null);
+          setFondoApertura(efectivoSugerido !== undefined ? efectivoSugerido : 50000);
           setEfectivoReal('');
           setObservacionesCierre('');
           setModoEdicionCierre(false);
@@ -1874,17 +2023,18 @@ function App() {
     }
   };
 
-  const cargarCierreCaja = async (dateStr) => {
+  const cargarCierreCaja = async (dateStr, shiftFilterStr) => {
     const targetDate = dateStr || fechaCierre;
+    const targetShift = shiftFilterStr !== undefined ? shiftFilterStr : filtroTurnoCierre;
     if (!targetDate) return;
     setLoadingCierre(true);
     setErrorCierre('');
     try {
-      const response = await fetch(`http://127.0.0.1:5000/api/informes/cierre?fecha=${targetDate}`);
+      const response = await fetch(`http://127.0.0.1:5000/api/informes/cierre?fecha=${targetDate}&turno_id=${targetShift}`);
       const data = await response.json();
       if (response.ok && data.success) {
         setCierreData(data.data);
-        await cargarCuadradoCaja(targetDate);
+        await cargarCuadradoCaja(targetDate, data.data.efectivo_inicial_sugerido);
       } else {
         setErrorCierre(data.message || 'Error al cargar el cierre de caja.');
       }
@@ -1894,6 +2044,11 @@ function App() {
     } finally {
       setLoadingCierre(false);
     }
+  };
+
+  const handleShiftFilterChange = (val) => {
+    setFiltroTurnoCierre(val);
+    cargarCierreCaja(fechaCierre, val);
   };
 
   const handleGuardarCuadradoCaja = async (e) => {
@@ -1944,6 +2099,37 @@ function App() {
     }
   };
 
+  const handleCorregirArqueoTurno = async (shiftId, efFinalVal, obsVal) => {
+    setGuardandoCierre(true);
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/turnos/arqueo/${shiftId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          efectivo_final: parseFloat(efFinalVal),
+          observaciones: obsVal || ''
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        abrirAlerta('El arqueo del turno se ha corregido con éxito.', 'Arqueo Actualizado');
+        setModoEdicionCierre(false);
+        cargarHistorialTurnos();
+        // Recargar el cierre diario consolidado del día
+        cargarCierreCaja(fechaCierre, filtroTurnoCierre);
+      } else {
+        abrirAlerta(data.message || 'Error al actualizar el arqueo.', 'Error');
+      }
+    } catch (err) {
+      console.error(err);
+      abrirAlerta('Error de red al intentar actualizar el arqueo.', 'Error de Conexión');
+    } finally {
+      setGuardandoCierre(false);
+    }
+  };
+
   const descargarExcelMensual = () => {
     if (!mesExcel) return;
     window.open(`http://127.0.0.1:5000/api/informes/excel?mes=${mesExcel}`);
@@ -1956,20 +2142,24 @@ function App() {
 
   useEffect(() => {
     if (user && activeTab === 'cierre') {
-      cargarCierreCaja();
+      setFiltroTurnoCierre('all');
+      cargarCierreCaja(fechaCierre, 'all');
     }
   }, [user, activeTab, fechaCierre]);
 
   useEffect(() => {
     if (user && activeTab === 'historial') {
-      cargarHistorial();
+      cargarHistorial(subTabHistorial);
     }
-  }, [user, activeTab]);
+  }, [user, activeTab, subTabHistorial]);
 
-  const cargarHistorial = async () => {
+  const cargarHistorial = async (tipo = subTabHistorial) => {
     setLoadingHistorial(true);
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/pedidos');
+      const endpoint = tipo === 'activas' 
+        ? 'http://127.0.0.1:5000/api/pedidos' 
+        : 'http://127.0.0.1:5000/api/pedidos/eliminados';
+      const response = await fetch(endpoint);
       const data = await response.json();
       if (response.ok && data.success) {
         setHistorialPedidos(data.pedidos);
@@ -2030,7 +2220,7 @@ function App() {
     }
 
     const envasesInfo = calcularEnvases(pedido, tipoEntrega);
-    const subtotalProductos = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+    const subtotalProductos = calcularSubtotalProductos(pedido);
     const totalPedido = subtotalProductos + envasesInfo.montoTotal;
     const atendidoPor = user ? user.nombre : 'Desconocido';
 
@@ -2089,7 +2279,8 @@ function App() {
       monto_credito: montoCred,
       pago_mixto_detalle: detalleMixto,
       cantidad_envases: envasesInfo.cantidadTotal,
-      monto_envases: envasesInfo.montoTotal
+      monto_envases: envasesInfo.montoTotal,
+      turno_id: activeShift?.id || null
     };
 
     try {
@@ -2516,6 +2707,12 @@ function App() {
                 >
                   📊 Cierre
                 </button>
+                <button 
+                  onClick={() => setActiveTab('configuraciones')} 
+                  className={`nav-tab ${activeTab === 'configuraciones' ? 'active' : ''}`}
+                >
+                  ⚙️ Configuraciones
+                </button>
               </div>
 
               <div className="header-actions" style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
@@ -2844,7 +3041,7 @@ function App() {
                         <div className="order-summary">
                           {(() => {
                             const envasesInfo = calcularEnvases(pedido, tipoEntrega);
-                            const subtotalProd = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+                            const subtotalProd = calcularSubtotalProductos(pedido);
                             const grandTotal = subtotalProd + envasesInfo.montoTotal;
 
                             return (
@@ -4411,9 +4608,28 @@ function App() {
             {activeTab === 'historial' && (
               <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                  <div className="admin-card-header">
-                    <h3 className="section-title">📋 Historial de Pedidos (Tickets)</h3>
-                    <p className="section-subtitle">Visualiza todas las comandas y tickets registrados en el sistema</p>
+                  <div className="admin-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.75rem' }}>
+                    <div style={{ flex: '1', minWidth: '250px' }}>
+                      <h3 className="section-title">📋 Historial de Pedidos (Tickets)</h3>
+                      <p className="section-subtitle" style={{ margin: 0 }}>Visualiza todas las comandas y tickets registrados en el sistema</p>
+                    </div>
+                    <div className="nav-tabs" style={{ display: 'flex', gap: '0.25rem' }}>
+                      <button
+                        type="button"
+                        className={`nav-tab ${subTabHistorial === 'activas' ? 'active' : ''}`}
+                        onClick={() => setSubTabHistorial('activas')}
+                      >
+                        📋 Comandas Activas
+                      </button>
+                      <button
+                        type="button"
+                        className={`nav-tab ${subTabHistorial === 'eliminadas' ? 'active' : ''}`}
+                        style={subTabHistorial === 'eliminadas' ? { background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)', boxShadow: '0 2px 8px rgba(239, 68, 68, 0.3)', color: 'white' } : {}}
+                        onClick={() => setSubTabHistorial('eliminadas')}
+                      >
+                        🗑️ Comandas Eliminadas
+                      </button>
+                    </div>
                   </div>
                   
                   {/* Buscador y Filtros */}
@@ -4460,7 +4676,32 @@ function App() {
                         onChange={(e) => setFiltroFechaFin(e.target.value)}
                       />
                     </div>
-                    {(filtroTicketId || filtroCliente || filtroFechaInicio || filtroFechaFin) && (
+                    <div style={{ flex: '1.5 1 140px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Filtrar por Turno</label>
+                      <select
+                        className="form-input"
+                        style={{ 
+                          padding: '0.5rem 1.5rem 0.5rem 0.75rem', 
+                          fontSize: '0.9rem', 
+                          height: '38px', 
+                          color: 'var(--text-primary)', 
+                          background: 'var(--input-bg)',
+                          border: '1px solid var(--glass-border)',
+                          borderRadius: '12px',
+                          cursor: 'pointer'
+                        }}
+                        value={filtroTurnoHistorial}
+                        onChange={(e) => setFiltroTurnoHistorial(e.target.value)}
+                      >
+                        <option value="all">📅 Todos los turnos</option>
+                        {listaTurnos.map(t => (
+                          <option key={t.id} value={t.id}>
+                            ⏰ Turno #{t.id} ({t.usuario_inicio} - {new Date(t.fecha_hora_inicio).toLocaleDateString('es-CL')})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {(filtroTicketId || filtroCliente || filtroFechaInicio || filtroFechaFin || filtroTurnoHistorial !== 'all') && (
                       <div style={{ display: 'flex' }}>
                         <button
                           type="button"
@@ -4471,6 +4712,7 @@ function App() {
                             setFiltroCliente('');
                             setFiltroFechaInicio('');
                             setFiltroFechaFin('');
+                            setFiltroTurnoHistorial('all');
                           }}
                         >
                           Limpiar Filtros
@@ -4496,6 +4738,9 @@ function App() {
                           return false;
                         }
                         if (filtroCliente && !ped.cliente_nombre.toLowerCase().includes(filtroCliente.toLowerCase().trim())) {
+                          return false;
+                        }
+                        if (filtroTurnoHistorial !== 'all' && String(ped.turno_id) !== String(filtroTurnoHistorial)) {
                           return false;
                         }
                         
@@ -4538,14 +4783,19 @@ function App() {
                                   id: p.producto_id,
                                   nombre: p.nombre_producto,
                                   cantidad: p.cantidad,
-                                  precio: parseFloat(p.precio_unitario)
+                                  precio: parseFloat(p.precio_unitario),
+                                  promocion_id: p.promocion_id,
+                                  productos_incluidos: p.productos_incluidos
                                 })),
                                 total: parseFloat(ped.total),
                                 atendido_por: ped.atendido_por,
                                 nota: ped.nota,
                                 tipo_entrega: ped.tipo_entrega,
                                 tipo_transaccion: ped.tipo_transaccion,
-                                pago_mixto_detalle: ped.pago_mixto_detalle
+                                pago_mixto_detalle: ped.pago_mixto_detalle,
+                                eliminado: ped.eliminado || subTabHistorial === 'eliminadas',
+                                eliminado_por: ped.eliminado_por,
+                                eliminado_fecha: ped.eliminado_fecha
                               })}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -4591,12 +4841,24 @@ function App() {
                                 <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: '600' }}>
                                   - {ped.cliente_nombre}
                                 </span>
+                                <span style={{ 
+                                  fontWeight: '800', 
+                                  color: 'var(--accent-primary)', 
+                                  fontSize: '0.95rem', 
+                                  background: 'var(--item-bg)', 
+                                  padding: '0.2rem 0.6rem', 
+                                  borderRadius: '8px', 
+                                  border: '1px solid var(--glass-border)',
+                                  marginLeft: '0.25rem'
+                                }}>
+                                  ${parseFloat(ped.total).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                </span>
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                 <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                                   {new Date(ped.fecha_hora).toLocaleDateString('es-CL')} - {new Date(ped.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
                                 </span>
-                                {user?.cargo?.toLowerCase() === 'administrador' && (
+                                {subTabHistorial === 'activas' && user?.cargo?.toLowerCase() === 'administrador' && (
                                    <button
                                      type="button"
                                      className="btn-danger"
@@ -4626,6 +4888,19 @@ function App() {
                                      🗑️ Eliminar
                                    </button>
                                  )}
+                                {subTabHistorial === 'eliminadas' && (
+                                  <span style={{
+                                    fontSize: '0.78rem',
+                                    color: '#ef4444',
+                                    background: 'rgba(239, 68, 68, 0.12)',
+                                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                                    borderRadius: '8px',
+                                    padding: '0.25rem 0.5rem',
+                                    fontWeight: '700'
+                                  }}>
+                                    🗑️ Eliminada por {ped.eliminado_por || 'N/A'} ({ped.eliminado_fecha ? new Date(ped.eliminado_fecha).toLocaleDateString('es-CL') : ''})
+                                  </span>
+                                )}
                                 <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>➔</span>
                               </div>
                             </div>
@@ -4684,19 +4959,58 @@ function App() {
                         )}
                       </div>
                       
-                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', alignItems: 'center' }}>
-                        <label style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Fecha:</label>
-                        <input
-                          type="date"
-                          className="form-input"
-                          style={{ padding: '0.35rem 0.75rem', fontSize: '0.9rem', height: '36px', width: '150px', color: 'var(--text-primary)' }}
-                          value={fechaCierre}
-                          onChange={(e) => setFechaCierre(e.target.value)}
-                        />
+                      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                          <label style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Fecha:</label>
+                          <input
+                            type="date"
+                            className="form-input"
+                            style={{ padding: '0.35rem 0.75rem', fontSize: '0.9rem', height: '36px', width: '135px', color: 'var(--text-primary)' }}
+                            value={fechaCierre}
+                            onChange={(e) => setFechaCierre(e.target.value)}
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                          <label style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Turno:</label>
+                          <select
+                            value={filtroTurnoCierre}
+                            onChange={(e) => handleShiftFilterChange(e.target.value)}
+                            className="form-input"
+                            style={{ 
+                              padding: '0.35rem 1.75rem 0.35rem 0.65rem', 
+                              fontSize: '0.9rem', 
+                              height: '36px', 
+                              color: 'var(--text-primary)', 
+                              background: 'var(--input-bg)',
+                              border: '1px solid var(--glass-border)',
+                              borderRadius: '12px',
+                              cursor: 'pointer',
+                              maxWidth: '180px'
+                            }}
+                          >
+                            <option value="all">📅 Todo el día (Todos)</option>
+                            {listaTurnos
+                              .filter(t => {
+                                const tDate = new Date(t.fecha_hora_inicio);
+                                const y = tDate.getFullYear();
+                                const m = String(tDate.getMonth() + 1).padStart(2, '0');
+                                const d = String(tDate.getDate()).padStart(2, '0');
+                                return `${y}-${m}-${d}` === fechaCierre;
+                              })
+                              .map(t => (
+                                <option key={t.id} value={t.id}>
+                                  ⏰ Turno #{t.id} ({t.usuario_inicio})
+                                </option>
+                              ))
+                            }
+                          </select>
+                        </div>
+
                         <button
                           type="button"
                           className="btn-secondary"
-                          style={{ height: '36px', padding: '0 1rem', fontSize: '0.85rem' }}
+                          style={{ height: '36px', padding: '0 0.85rem', fontSize: '0.85rem' }}
                           onClick={() => cargarCierreCaja()}
                         >
                           🔄 Recargar
@@ -4824,28 +5138,6 @@ function App() {
                               )}
                             </div>
 
-                            {/* Productos Incluidos en Promociones */}
-                            {cierreData.productos_promociones && cierreData.productos_promociones.length > 0 && (
-                              <div className="cierre-sub-card">
-                                <h5 className="cierre-sub-card-title">🍔 Productos Incluidos en Promociones</h5>
-                                <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                  {cierreData.productos_promociones.map((p, idx) => (
-                                    <div key={idx} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <span className="cierre-item-name" style={{ flex: 1 }}>{p.nombre_producto}</span>
-                                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                        {p.cantidad_total} un.
-                                      </span>
-                                    </div>
-                                  ))}
-                                  <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '2px dashed var(--accent-primary)', paddingTop: '0.65rem', marginTop: '0.5rem', background: 'rgba(255, 255, 255, 0.06)', fontWeight: 'bold' }}>
-                                    <span className="cierre-item-name" style={{ fontWeight: '700' }}>Total Productos en Promociones:</span>
-                                    <strong style={{ color: 'var(--accent-primary)', fontSize: '0.98rem' }}>
-                                      {cierreData.productos_promociones.reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0)} un.
-                                    </strong>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
 
                             {/* Materia Prima Gastada */}
                             <div className="cierre-sub-card">
@@ -4865,163 +5157,7 @@ function App() {
                             </div>
                           </div>
 
-                          {/* SECCIÓN CUADRADO DE CAJA (Al final del informe) */}
-                          {cierreRegistradoData && !modoEdicionCierre ? (
-                            /* Vista: Caja ya cuadrada */
-                            <div className="cierre-registrado-card">
-                              <h5 className="cierre-card-title">✅ Caja Cuadrada para este Día</h5>
-                              
-                              <div className="cierre-card-details">
-                                <div className="cierre-card-row">
-                                  <span>Cerrado por:</span>
-                                  <strong>{cierreRegistradoData.cargado_por}</strong>
-                                </div>
-                                <div className="cierre-card-row">
-                                  <span>Fondo Inicial:</span>
-                                  <strong>${cierreRegistradoData.fondo_apertura.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
-                                </div>
-                                <div className="cierre-card-row">
-                                  <span>Efectivo Ventas:</span>
-                                  <strong>${cierreRegistradoData.total_efectivo.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
-                                </div>
-                                <div className="cierre-card-row highlighted-row">
-                                  <span>Efectivo Esperado:</span>
-                                  <strong>${(cierreRegistradoData.total_efectivo + cierreRegistradoData.fondo_apertura).toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
-                                </div>
-                                <div className="cierre-card-row highlighted-row">
-                                  <span>Efectivo Real en Caja:</span>
-                                  <strong>${cierreRegistradoData.efectivo_real.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
-                                </div>
-                                
-                                <div className={`cierre-card-row result-row ${cierreRegistradoData.diferencia === 0 ? 'status-ok' : cierreRegistradoData.diferencia > 0 ? 'status-surplus' : 'status-shortage'}`}>
-                                  <span>Diferencia:</span>
-                                  <strong>
-                                    {cierreRegistradoData.diferencia === 0 
-                                      ? 'Caja Cuadrada ($0)' 
-                                      : `${cierreRegistradoData.diferencia > 0 ? 'Sobrante (+$' : 'Faltante (-$'}${Math.abs(cierreRegistradoData.diferencia).toLocaleString('es-CL', { minimumFractionDigits: 0 })}`}
-                                  </strong>
-                                </div>
 
-                                {cierreRegistradoData.observaciones && (
-                                  <div className="cierre-card-obs">
-                                    <span>Observaciones:</span>
-                                    <p>{cierreRegistradoData.observaciones}</p>
-                                  </div>
-                                )}
-                              </div>
-
-                              <button 
-                                type="button" 
-                                className="btn-secondary" 
-                                style={{ marginTop: '0.75rem', width: '100%' }}
-                                onClick={() => setModoEdicionCierre(true)}
-                              >
-                                ✏️ Corregir Arqueo
-                              </button>
-                            </div>
-                          ) : (
-                            /* Vista: Formulario de Arqueo */
-                            <form onSubmit={handleGuardarCuadradoCaja} className="cierre-form-card">
-                              <h5 className="cierre-card-title">🔐 Realizar Arqueo (Cuadrado de Caja)</h5>
-                              
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
-                                <div className="cierre-form-field">
-                                  <label>💵 Fondo Inicial de Caja (Apertura):</label>
-                                  <input 
-                                    type="number" 
-                                    className="form-input" 
-                                    value={fondoApertura} 
-                                    onChange={(e) => setFondoApertura(e.target.value)}
-                                    placeholder="Ej: 50000"
-                                    style={{ height: '36px', color: 'var(--text-primary)' }}
-                                  />
-                                </div>
-
-                                <div className="cierre-form-field">
-                                  <label>💰 Efectivo Real en Caja (Contado):</label>
-                                  <input 
-                                    type="number" 
-                                    className="form-input" 
-                                    value={efectivoReal} 
-                                    onChange={(e) => setEfectivoReal(e.target.value)}
-                                    placeholder="Ingresa el monto total contado"
-                                    style={{ height: '36px', color: 'var(--text-primary)' }}
-                                  />
-                                </div>
-
-                                <div className="cierre-form-field">
-                                  <label>📝 Observaciones / Notas:</label>
-                                  <textarea 
-                                    className="form-input" 
-                                    value={observacionesCierre} 
-                                    onChange={(e) => setObservacionesCierre(e.target.value)}
-                                    placeholder="Nota opcional (ej: retiro de sencillo, descuadre de vuelto)"
-                                    style={{ height: '60px', color: 'var(--text-primary)', padding: '0.5rem', resize: 'none' }}
-                                  />
-                                </div>
-
-                                {/* Resumen y cálculo de diferencia en tiempo real */}
-                                {(() => {
-                                  const fAperturaNum = parseFloat(fondoApertura) || 0;
-                                  const eRealNum = parseFloat(efectivoReal) || 0;
-                                  const eEsperadoNum = (cierreData.total_efectivo || 0) + fAperturaNum;
-                                  const difNum = eRealNum - eEsperadoNum;
-
-                                  return (
-                                    <div className="cierre-live-summary">
-                                      <div className="live-row">
-                                        <span>Efectivo Esperado:</span>
-                                        <strong>${eEsperadoNum.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
-                                      </div>
-                                      <div className="live-row">
-                                        <span>Efectivo Declarado:</span>
-                                        <strong>${eRealNum.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
-                                      </div>
-                                      <div className={`live-row live-difference ${efectivoReal === '' ? '' : difNum === 0 ? 'status-ok' : difNum > 0 ? 'status-surplus' : 'status-shortage'}`}>
-                                        <span>Diferencia:</span>
-                                        <strong>
-                                          {efectivoReal === '' 
-                                            ? 'Por calcular' 
-                                            : difNum === 0 
-                                              ? 'Cuadrado ($0)' 
-                                              : `${difNum > 0 ? 'Sobrante (+$' : 'Faltante (-$'}${Math.abs(difNum).toLocaleString('es-CL', { minimumFractionDigits: 0 })}`}
-                                        </strong>
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-
-                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                                  {modoEdicionCierre && (
-                                    <button 
-                                      type="button" 
-                                      className="btn-secondary" 
-                                      style={{ flex: 1, height: '40px' }}
-                                      onClick={() => {
-                                        setModoEdicionCierre(false);
-                                        // Restablecer valores originales si se cancela
-                                        if (cierreRegistradoData) {
-                                          setFondoApertura(cierreRegistradoData.fondo_apertura);
-                                          setEfectivoReal(cierreRegistradoData.efectivo_real.toString());
-                                          setObservacionesCierre(cierreRegistradoData.observaciones);
-                                        }
-                                      }}
-                                    >
-                                      Cancelar
-                                    </button>
-                                  )}
-                                  <button 
-                                    type="submit" 
-                                    className="btn-primary" 
-                                    style={{ flex: 2, height: '40px', background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', boxShadow: 'none' }}
-                                    disabled={guardandoCierre}
-                                  >
-                                    {guardandoCierre ? 'Guardando...' : modoEdicionCierre ? 'Actualizar Arqueo' : 'Finalizar Arqueo'}
-                                  </button>
-                                </div>
-                              </div>
-                            </form>
-                          )}
                         </div>
                       ) : (
                         <p style={{ color: 'var(--text-muted)' }}>Selecciona una fecha para visualizar el cierre.</p>
@@ -5030,78 +5166,180 @@ function App() {
 
                     {/* Columna Derecha: Reportes y Exportaciones */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', height: '100%', overflowY: 'auto', paddingRight: '0.25rem' }}>
-                      {/* Reporte Mensual a Excel */}
+                      {/* Gestión de Turnos */}
                       <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
-                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📈 Reporte Mensual a Excel</h4>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          ⏰ Gestión de Turnos (Sesiones)
+                        </h4>
                         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
-                          Descarga un archivo de Excel (.xlsx) con el resumen diario de ventas (separando efectivo de tarjetas) de todo el mes seleccionado.
+                          Inicia y finaliza turnos de trabajo de forma independiente a la fecha del calendario. Cada venta queda asociada al turno correspondiente.
                         </p>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Mes:</label>
-                            <input
-                              type="month"
-                              className="form-input"
-                              style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
-                              value={mesExcel}
-                              onChange={(e) => setMesExcel(e.target.value)}
-                            />
+                        {/* Estado del Turno Activo */}
+                        <div style={{
+                          background: activeShift ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                          border: activeShift ? '1px dashed var(--success)' : '1px dashed var(--error)',
+                          borderRadius: '12px',
+                          padding: '0.85rem',
+                          marginBottom: '1rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '1rem'
+                        }}>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>
+                            {activeShift ? (
+                              <>
+                                <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>● Turno Activo #{activeShift.id}</span>
+                                <div style={{ marginTop: '0.2rem', color: 'var(--text-secondary)' }}>
+                                  Iniciado por: <strong>{activeShift.usuario_inicio}</strong><br />
+                                  Desde: {new Date(activeShift.fecha_hora_inicio).toLocaleDateString('es-CL')} - {new Date(activeShift.fecha_hora_inicio).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <span style={{ color: 'var(--error)', fontWeight: 'bold' }}>○ Sin Turno Activo</span>
+                                <div style={{ marginTop: '0.2rem', color: 'var(--text-secondary)' }}>
+                                  Inicia un turno para asociarle las nuevas ventas.
+                                </div>
+                              </>
+                            )}
                           </div>
+                          
+                          {activeShift ? (
+                            <button
+                              type="button"
+                              className="btn-danger"
+                              style={{ height: '36px', padding: '0 0.85rem', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+                              onClick={async () => {
+                                setEfectivoFinalInput('');
+                                setObservacionesCerrarShiftInput('');
+                                setErrorCerrarShiftInput('');
+                                setActiveShiftSalesInfo(null);
+                                setShowCerrarTurnoPrompt(true);
+                                try {
+                                  const today = new Date().toISOString().split('T')[0];
+                                  const response = await fetch(`http://127.0.0.1:5000/api/informes/cierre?fecha=${today}&turno_id=${activeShift.id}`);
+                                  const data = await response.json();
+                                  if (response.ok && data.success) {
+                                    setActiveShiftSalesInfo(data.data);
+                                  }
+                                } catch (e) {
+                                  console.error("Error al obtener ventas del turno activo:", e);
+                                }
+                              }}
+                            >
+                              🔒 Cerrar Turno
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-primary"
+                              style={{ height: '36px', padding: '0 0.85rem', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+                              onClick={() => {
+                                setEfectivoInicialInput('');
+                                setErrorShiftInput('');
+                                setShowShiftPrompt(true);
+                              }}
+                            >
+                              🔑 Iniciar Turno
+                            </button>
+                          )}
+                        </div>
 
-                          <button
-                            type="button"
-                            className="btn-primary"
-                            style={{ marginTop: '1rem', height: '42px', gap: '0.5rem' }}
-                            onClick={descargarExcelMensual}
-                          >
-                            📥 Descargar Excel (.xlsx)
-                          </button>
+                        {/* Historial de Turnos */}
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <h5 style={{ fontSize: '0.9rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>📋 Historial Reciente de Turnos</h5>
+                          
+                          {loadingTurnos ? (
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Cargando turnos...</p>
+                          ) : listaTurnos.length === 0 ? (
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No hay turnos registrados en el sistema.</p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxHeight: '250px', overflowY: 'auto', paddingRight: '0.25rem' }}>
+                              {listaTurnos.map((t) => (
+                                <div key={t.id} style={{
+                                  background: 'rgba(255, 255, 255, 0.02)',
+                                  border: '1px solid var(--glass-border)',
+                                  borderRadius: '10px',
+                                  padding: '0.65rem 0.75rem',
+                                  fontSize: '0.8rem',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '0.35rem'
+                                }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <strong style={{ color: t.activo ? 'var(--success)' : 'var(--text-primary)' }}>
+                                      Turno #{t.id} {t.activo ? '(Activo)' : ''}
+                                    </strong>
+                                    <span style={{ fontWeight: '700', color: 'var(--accent-primary)' }}>
+                                      ${t.total_ventas.toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                    </span>
+                                  </div>
+                                  
+                                  <div style={{ color: 'var(--text-secondary)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem' }}>
+                                    <div>
+                                      🔑 <strong>Inicio:</strong> {t.usuario_inicio}<br />
+                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                        {new Date(t.fecha_hora_inicio).toLocaleDateString('es-CL')} - {new Date(t.fecha_hora_inicio).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                                      </span><br />
+                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                        💵 Inicial: <strong>${(t.efectivo_inicial || 0).toLocaleString('es-CL')}</strong>
+                                      </span>
+                                    </div>
+                                    <div>
+                                      🔒 <strong>Cierre:</strong> {t.usuario_fin || (t.activo ? '—' : 'Auto')}<br />
+                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                        {t.fecha_hora_fin ? `${new Date(t.fecha_hora_fin).toLocaleDateString('es-CL')} - ${new Date(t.fecha_hora_fin).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}` : 'En curso'}
+                                      </span><br />
+                                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                        💵 Final: <strong>{t.activo ? '—' : `$${(t.efectivo_final || 0).toLocaleString('es-CL')}`}</strong>
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div style={{
+                                    borderTop: '1px solid var(--glass-border)',
+                                    paddingTop: '0.35rem',
+                                    marginTop: '0.15rem',
+                                    fontSize: '0.75rem',
+                                    color: 'var(--text-muted)',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    flexWrap: 'wrap',
+                                    gap: '0.5rem'
+                                  }}>
+                                    <span>🛒 Pedidos: <strong>{t.cantidad_pedidos}</strong></span>
+                                    <span>💵 Efec: <strong>${t.total_efectivo.toLocaleString('es-CL')}</strong></span>
+                                    <span>💳 Tarj: <strong>${(t.total_debito + t.total_credito).toLocaleString('es-CL')}</strong></span>
+                                    <span>📦 Envs: <strong>${t.total_envases.toLocaleString('es-CL')}</strong></span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      {/* Nuevo Reporte de Ventas Detallado por Rango de Fechas */}
-                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
-                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📊 Reporte de Ventas por Rango (Detallado)</h4>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
-                          Descarga un archivo de Excel (.xlsx) con el detalle de todos los productos vendidos, sus cantidades y los montos totales recaudados entre las fechas seleccionadas.
-                        </p>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                          <div style={{ display: 'flex', gap: '1rem' }}>
-                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                              <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Fecha Inicio:</label>
-                              <input
-                                type="date"
-                                className="form-input"
-                                style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
-                                value={fechaInicioReporte}
-                                onChange={(e) => setFechaInicioReporte(e.target.value)}
-                              />
-                            </div>
-                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                              <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Fecha Fin:</label>
-                              <input
-                                type="date"
-                                className="form-input"
-                                style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
-                                value={fechaFinReporte}
-                                onChange={(e) => setFechaFinReporte(e.target.value)}
-                              />
-                            </div>
-                          </div>
 
-                          <button
-                            type="button"
-                            className="btn-primary"
-                            style={{ marginTop: '1rem', height: '42px', gap: '0.5rem' }}
-                            onClick={descargarReporteProductosRango}
-                          >
-                            📥 Descargar Reporte (.xlsx)
-                          </button>
-                        </div>
-                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
+            {activeTab === 'configuraciones' && (
+              <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div className="admin-card-header" style={{ marginBottom: '1rem' }}>
+                    <h3 className="section-title">⚙️ Configuraciones de la Aplicación</h3>
+                    <p className="section-subtitle">Gestiona las opciones de impresión, envases, correos y otras preferencias de la plataforma</p>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: user?.cargo?.toLowerCase() === 'administrador' ? '1fr 1fr' : '1fr', gap: '2rem', flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '0.25rem' }}>
+                    {/* Columna Izquierda: Configuración de Impresora y Precio de Envase */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                       {/* Configuración de Impresora */}
                       {window.electronAPI && (
                         <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
@@ -5132,150 +5370,186 @@ function App() {
                               <option value="">Predeterminada del Sistema</option>
                               {printers.map(p => (
                                 <option key={p.name} value={p.name}>
-                                  {p.name}
+                                  {p.name} {p.isDefault ? '(Predeterminada del sistema)' : ''}
                                 </option>
                               ))}
                             </select>
                             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                              Impresora configurada actualmente: <strong>{selectedPrinter || 'Predeterminada'}</strong>
+                              Impresora configurada actualmente: <strong>{selectedPrinter || 'Predeterminada del Sistema'}</strong>
                             </p>
                           </div>
                         </div>
                       )}
 
-                      {/* Configuración de Precio de Envase */}
+                      {/* Reporte Mensual a Excel */}
                       <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
-                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          📦 Precio del Envase para Llevar
-                        </h4>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
-                          Establece el precio unitario del envase ($) que se calculará en los pedidos Para Llevar.
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>📈 Reporte Mensual a Excel</h4>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1.25rem' }}>
+                          Descarga un archivo de Excel (.xlsx) con el resumen diario de ventas (separando efectivo de tarjetas) de todo el mes seleccionado.
                         </p>
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem', alignItems: 'center' }}>
-                          <div className="input-wrapper" style={{ margin: 0, position: 'relative' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Mes:</label>
                             <input
-                              type="number"
-                              min="0"
+                              type="month"
                               className="form-input"
-                              placeholder="300"
-                              value={precioEnvase}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setPrecioEnvase(val === '' ? '' : parseInt(val, 10) || 0);
-                              }}
-                              onBlur={() => setPrecioEnvase(parseInt(precioEnvase, 10) || 0)}
-                              style={{ height: '38px', fontSize: '0.95rem', paddingLeft: '2.2rem', paddingRight: '0.75rem', width: '100%', boxSizing: 'border-box', color: 'var(--text-primary)' }}
+                              style={{ padding: '0.5rem 1rem', fontSize: '0.95rem', height: '38px', color: 'var(--text-primary)' }}
+                              value={mesExcel}
+                              onChange={(e) => setMesExcel(e.target.value)}
                             />
-                            <span className="input-icon" style={{ left: '0.75rem' }}>💲</span>
                           </div>
+
                           <button
                             type="button"
                             className="btn-primary"
-                            style={{ height: '38px', padding: '0 1rem', fontSize: '0.85rem', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
-                            onClick={guardarConfiguracion}
+                            style={{ marginTop: '1rem', height: '42px', gap: '0.5rem' }}
+                            onClick={descargarExcelMensual}
                           >
-                            💾 Guardar Precio
+                            📥 Descargar Excel (.xlsx)
                           </button>
                         </div>
                       </div>
+                    </div>
 
-                      {/* Configuración de Correo de Recepción */}
-                      <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
-                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          📬 Correo de Recepción de Reportes
-                        </h4>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                          Ingresa el correo destinatario que recibirá los reportes de inventario y cierres de caja.
-                        </p>
+                    {/* Columna Derecha: Configuración de Correo de Recepción */}
+                    {user?.cargo?.toLowerCase() === 'administrador' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                        {/* Configuración de Correo de Recepción */}
+                        <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                          <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            📬 Correo de Recepción de Reportes
+                          </h4>
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                            Ingresa el correo destinatario que recibirá los reportes de inventario y cierres de caja.
+                          </p>
 
-                        <form onSubmit={guardarConfiguracion} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                          <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label className="form-label" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Correo Destinatario (Para)</label>
-                            <input
-                              type="email"
-                              className="form-input"
-                              placeholder="ejemplo@correo.com"
-                              value={configEmailTo}
-                              onChange={(e) => setConfigEmailTo(e.target.value)}
-                              required
-                              style={{
-                                padding: '0.5rem 1rem',
-                                fontSize: '0.95rem',
-                                height: '38px',
-                                color: 'var(--text-primary)',
-                                background: 'var(--input-bg)',
-                                border: '1px solid var(--glass-border)',
-                                borderRadius: '12px',
-                                width: '100%'
-                              }}
-                            />
-                          </div>
-
-                          {configSuccess && (
-                            <div className="alert alert-success" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}>
-                              <span>{configSuccess}</span>
+                          <form onSubmit={guardarConfiguracion} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label className="form-label" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Correo Destinatario (Para)</label>
+                              <input
+                                type="email"
+                                className="form-input"
+                                placeholder="ejemplo@correo.com"
+                                value={configEmailTo}
+                                onChange={(e) => setConfigEmailTo(e.target.value)}
+                                required
+                                style={{
+                                  padding: '0.5rem 1rem',
+                                  fontSize: '0.95rem',
+                                  height: '38px',
+                                  color: 'var(--text-primary)',
+                                  background: 'var(--input-bg)',
+                                  border: '1px solid var(--glass-border)',
+                                  borderRadius: '12px',
+                                  width: '100%'
+                                }}
+                              />
                             </div>
-                          )}
-                          {configError && (
-                            <div className="alert alert-error" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}>
-                              <span>{configError}</span>
-                            </div>
-                          )}
 
-                          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
-                            <button type="submit" className="btn-primary" style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }} disabled={configLoading}>
-                              {configLoading ? 'Guardando...' : '💾 Guardar Correo'}
-                            </button>
-                            
+                            {configSuccess && (
+                              <div className="alert alert-success" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}>
+                                <span>{configSuccess}</span>
+                              </div>
+                            )}
+                            {configError && (
+                              <div className="alert alert-error" style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}>
+                                <span>{configError}</span>
+                              </div>
+                            )}
+
+                            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                              <button type="submit" className="btn-primary" style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }} disabled={configLoading}>
+                                {configLoading ? 'Guardando...' : '💾 Guardar Correo'}
+                              </button>
+                              
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                                disabled={configLoading}
+                                onClick={async () => {
+                                  try {
+                                    setConfigLoading(true);
+                                    setConfigSuccess('');
+                                    setConfigError('');
+                                    
+                                    const config = {
+                                      REPORT_EMAIL_TO: configEmailTo
+                                    };
+
+                                    let saveResponse = await fetch('http://127.0.0.1:5000/api/configuracion', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ config })
+                                    });
+                                    
+                                    if (!saveResponse.ok) {
+                                      throw new Error('Error al guardar el correo.');
+                                    }
+
+                                    const response = await fetch('http://127.0.0.1:5000/api/reportes/enviar', {
+                                      method: 'POST'
+                                    });
+                                    const data = await response.json();
+                                    if (response.ok && data.success) {
+                                      setConfigSuccess('¡Reporte de prueba enviado!');
+                                    } else {
+                                      setConfigError(data.message || 'Error al enviar correo de prueba.');
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                    setConfigError(err.message || 'Error de red al enviar correo de prueba.');
+                                  } finally {
+                                    setConfigLoading(false);
+                                  }
+                                }}
+                              >
+                                {configLoading ? 'Enviando...' : '📧 Probar Envío'}
+                              </button>
+                            </div>
+                          </form>
+                        </div>
+
+                        {/* Configuración de Precio de Envase */}
+                        <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
+                          <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            📦 Precio del Envase para Llevar
+                          </h4>
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
+                            Establece el precio unitario del envase ($) que se calculará en los pedidos Para Llevar.
+                          </p>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem', alignItems: 'center' }}>
+                            <div className="input-wrapper" style={{ margin: 0, position: 'relative' }}>
+                              <input
+                                type="number"
+                                min="0"
+                                className="form-input"
+                                placeholder="300"
+                                value={precioEnvase}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setPrecioEnvase(val === '' ? '' : parseInt(val, 10) || 0);
+                                }}
+                                onBlur={() => setPrecioEnvase(parseInt(precioEnvase, 10) || 0)}
+                                style={{ height: '38px', fontSize: '0.95rem', paddingLeft: '2.2rem', paddingRight: '0.75rem', width: '100%', boxSizing: 'border-box', color: 'var(--text-primary)' }}
+                              />
+                              <span className="input-icon" style={{ left: '0.75rem' }}>💲</span>
+                            </div>
                             <button
                               type="button"
-                              className="btn-secondary"
-                              style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }}
-                              disabled={configLoading}
-                              onClick={async () => {
-                                try {
-                                  setConfigLoading(true);
-                                  setConfigSuccess('');
-                                  setConfigError('');
-                                  
-                                  const config = {
-                                    REPORT_EMAIL_TO: configEmailTo
-                                  };
-
-                                  let saveResponse = await fetch('http://127.0.0.1:5000/api/configuracion', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ config })
-                                  });
-                                  
-                                  if (!saveResponse.ok) {
-                                    throw new Error('Error al guardar el correo.');
-                                  }
-
-                                  const response = await fetch('http://127.0.0.1:5000/api/reportes/enviar', {
-                                    method: 'POST'
-                                  });
-                                  const data = await response.json();
-                                  if (response.ok && data.success) {
-                                    setConfigSuccess('¡Reporte de prueba enviado!');
-                                  } else {
-                                    setConfigError(data.message || 'Error al enviar correo de prueba.');
-                                  }
-                                } catch (err) {
-                                  console.error(err);
-                                  setConfigError(err.message || 'Error de red al enviar correo de prueba.');
-                                } finally {
-                                  setConfigLoading(false);
-                                }
-                              }}
+                              className="btn-primary"
+                              style={{ height: '38px', padding: '0 1rem', fontSize: '0.85rem', width: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}
+                              onClick={guardarConfiguracion}
                             >
-                              {configLoading ? 'Enviando...' : '📧 Probar Envío'}
+                              💾 Guardar Precio
                             </button>
                           </div>
-                        </form>
+                        </div>
+
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -5493,32 +5767,221 @@ function App() {
         )}
       </main>
 
-      {modalConfig.isOpen && (
+      {showShiftPrompt && (
         <div className="custom-modal-overlay">
-          <div className="custom-modal-card">
+          <div className="custom-modal-card" style={{ maxWidth: '420px' }}>
             <div className="custom-modal-header">
-              <span className="custom-modal-icon">{modalConfig.isAlert ? '⚠️' : '❓'}</span>
-              <h3 className="custom-modal-title">{modalConfig.title}</h3>
+              <span className="custom-modal-icon">🔑</span>
+              <h3 className="custom-modal-title">Apertura de Turno Requerida</h3>
             </div>
             <div className="custom-modal-body">
-              <p className="custom-modal-message">{modalConfig.message}</p>
+              <p className="custom-modal-message" style={{ marginBottom: '1.25rem' }}>
+                No hay ningún turno de trabajo activo actualmente. Debes iniciar un nuevo turno para poder operar en el sistema de comandas.
+              </p>
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Efectivo Inicial en Caja ($) <span style={{ color: 'red' }}>*</span></label>
+                <div className="input-wrapper" style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    className="form-input"
+                    placeholder="Monto de apertura (ej. 15000)"
+                    value={efectivoInicialInput}
+                    onChange={(e) => {
+                      setEfectivoInicialInput(e.target.value);
+                      if (errorShiftInput) setErrorShiftInput('');
+                    }}
+                    style={{ 
+                      color: 'var(--text-primary)', 
+                      background: 'var(--input-bg)', 
+                      paddingLeft: '2.5rem',
+                      borderColor: errorShiftInput ? '#ef4444' : undefined
+                    }}
+                  />
+                  <span className="input-icon" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}>💵</span>
+                </div>
+                {errorShiftInput && (
+                  <div style={{ color: '#ef4444', fontSize: '0.82rem', fontWeight: 'bold', marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    ⚠️ {errorShiftInput}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="custom-modal-actions">
-              {!modalConfig.isAlert && (
-                <button
-                  type="button"
-                  className="btn-secondary custom-modal-btn-cancel"
-                  onClick={modalConfig.onCancel}
-                >
-                  {modalConfig.cancelText}
-                </button>
-              )}
+            <div className="custom-modal-footer" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <button
                 type="button"
-                className="btn-primary custom-modal-btn-confirm"
-                onClick={modalConfig.onConfirm}
+                className="btn-secondary"
+                onClick={() => {
+                  setShowShiftPrompt(false);
+                  setErrorShiftInput('');
+                  handleLogout();
+                }}
               >
-                {modalConfig.confirmText}
+                🚪 Cerrar Sesión
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  if (efectivoInicialInput === '' || isNaN(parseFloat(efectivoInicialInput)) || parseFloat(efectivoInicialInput) < 0) {
+                    const msg = 'Por favor, ingresa un monto válido para el efectivo inicial de apertura.';
+                    setErrorShiftInput(msg);
+                    abrirAlerta(msg, 'Monto Inválido');
+                    return;
+                  }
+                  setErrorShiftInput('');
+                  setShowShiftPrompt(false);
+                  await iniciarTurno(null, efectivoInicialInput);
+                  setEfectivoInicialInput('');
+                }}
+              >
+                🔑 Iniciar Turno
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showCerrarTurnoPrompt && (
+        <div className="custom-modal-overlay">
+          <div className="custom-modal-card" style={{ maxWidth: '450px' }}>
+            <div className="custom-modal-header">
+              <span className="custom-modal-icon">🔐</span>
+              <h3 className="custom-modal-title">Arqueo y Cierre de Turno #{activeShift?.id}</h3>
+            </div>
+            <div className="custom-modal-body">
+              <p className="custom-modal-message" style={{ marginBottom: '1rem', fontSize: '0.88rem' }}>
+                Cuenta e ingresa el efectivo total final en caja. El sistema calculará la diferencia automáticamente.
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
+                {activeShiftSalesInfo ? (
+                  <div className="cierre-live-summary" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.65rem 0.75rem', borderRadius: '10px', fontSize: '0.85rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                      <span>💵 Fondo Inicial de Apertura:</span>
+                      <strong>${(activeShift.efectivo_inicial || 0).toLocaleString('es-CL')}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                      <span>🍔 Ventas en Efectivo del Turno:</span>
+                      <strong>${(activeShiftSalesInfo.total_efectivo || 0).toLocaleString('es-CL')}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '0.35rem', fontWeight: '700' }}>
+                      <span>💰 Efectivo Esperado en Caja:</span>
+                      <strong>${((activeShift.efectivo_inicial || 0) + (activeShiftSalesInfo.total_efectivo || 0)).toLocaleString('es-CL')}</strong>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Calculando resumen de ventas del turno...</p>
+                )}
+
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.85rem' }}>
+                    Efectivo Final en Caja ($) <span style={{ color: 'red' }}>*</span>
+                  </label>
+                  <div className="input-wrapper" style={{ position: 'relative' }}>
+                    <input
+                      type="number"
+                      className="form-input"
+                      placeholder="Monto de cierre (ej. 45000)"
+                      value={efectivoFinalInput}
+                      onChange={(e) => {
+                        setEfectivoFinalInput(e.target.value);
+                        if (errorCerrarShiftInput) setErrorCerrarShiftInput('');
+                      }}
+                      style={{ 
+                        color: 'var(--text-primary)', 
+                        background: 'var(--input-bg)', 
+                        paddingLeft: '2.5rem',
+                        borderColor: errorCerrarShiftInput ? '#ef4444' : undefined,
+                        height: '36px'
+                      }}
+                    />
+                    <span className="input-icon" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}>💵</span>
+                  </div>
+                </div>
+
+                {activeShiftSalesInfo && efectivoFinalInput !== '' && (
+                  (() => {
+                    const expected = (activeShift.efectivo_inicial || 0) + (activeShiftSalesInfo.total_efectivo || 0);
+                    const declared = parseFloat(efectivoFinalInput) || 0;
+                    const diff = declared - expected;
+                    return (
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        padding: '0.5rem 0.75rem', 
+                        borderRadius: '8px', 
+                        fontSize: '0.85rem', 
+                        fontWeight: '700',
+                        background: diff === 0 ? 'rgba(16, 185, 129, 0.1)' : diff > 0 ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                        color: diff === 0 ? '#10b981' : diff > 0 ? '#3b82f6' : '#ef4444'
+                      }}>
+                        <span>Diferencia:</span>
+                        <span>
+                          {diff === 0 ? 'Caja Cuadrada ($0)' : `${diff > 0 ? 'Sobrante (+$' : 'Faltante (-$'}${Math.abs(diff).toLocaleString('es-CL')}`}
+                        </span>
+                      </div>
+                    );
+                  })()
+                )}
+
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.85rem' }}>
+                    Observaciones / Notas
+                  </label>
+                  <textarea
+                    className="form-input"
+                    placeholder="Nota opcional (ej. retiro de sencillo, descuadre de vuelto)"
+                    value={observacionesCerrarShiftInput}
+                    onChange={(e) => setObservacionesCerrarShiftInput(e.target.value)}
+                    style={{ 
+                      color: 'var(--text-primary)', 
+                      background: 'var(--input-bg)', 
+                      height: '50px',
+                      padding: '0.4rem 0.65rem',
+                      resize: 'none',
+                      fontSize: '0.85rem'
+                    }}
+                  />
+                </div>
+
+                {errorCerrarShiftInput && (
+                  <div style={{ color: '#ef4444', fontSize: '0.82rem', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    ⚠️ {errorCerrarShiftInput}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="custom-modal-footer" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setShowCerrarTurnoPrompt(false);
+                  setErrorCerrarShiftInput('');
+                  setEfectivoFinalInput('');
+                  setObservacionesCerrarShiftInput('');
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  if (efectivoFinalInput === '' || isNaN(parseFloat(efectivoFinalInput)) || parseFloat(efectivoFinalInput) < 0) {
+                    const msg = 'Por favor, ingresa un monto válido para el efectivo final de cierre.';
+                    setErrorCerrarShiftInput(msg);
+                    abrirAlerta(msg, 'Monto Inválido');
+                    return;
+                  }
+                  setErrorCerrarShiftInput('');
+                  setShowCerrarTurnoPrompt(false);
+                  await cerrarTurno(efectivoFinalInput, observacionesCerrarShiftInput);
+                  setEfectivoFinalInput('');
+                  setObservacionesCerrarShiftInput('');
+                }}
+              >
+                Confirmar y Cerrar
               </button>
             </div>
           </div>
@@ -5591,7 +6054,7 @@ function App() {
 
                   {tipoTransaccion === 'Mixto' && (() => {
                     const envasesInfo = calcularEnvases(pedido, tipoEntrega);
-                    const totalM = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0) + envasesInfo.montoTotal;
+                    const totalM = calcularSubtotalProductos(pedido) + envasesInfo.montoTotal;
                     const efecM = parseFloat(montoEfectivoMixto) || 0;
                     const debM = parseFloat(montoDebitoMixto) || 0;
                     const credM = parseFloat(montoCreditoMixto) || 0;
@@ -5703,7 +6166,7 @@ function App() {
                 {/* Total del Pedido elegante */}
                 {(() => {
                   const envasesInfo = calcularEnvases(pedido, tipoEntrega);
-                  const subtotalProd = pedido.reduce((acc, curr) => acc + (parseFloat(curr.precio) * curr.cantidad), 0);
+                  const subtotalProd = calcularSubtotalProductos(pedido);
                   const grandTotal = subtotalProd + envasesInfo.montoTotal;
 
                   return (
@@ -5760,6 +6223,25 @@ function App() {
           <div className="comanda-ticket-card">
             {/* Cabecera del Ticket */}
             <div className="comanda-header">
+              {comandaData.eliminado && (
+                <div style={{
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '10px',
+                  padding: '0.6rem 0.8rem',
+                  marginBottom: '1rem',
+                  textAlign: 'center',
+                  color: '#ef4444',
+                  fontWeight: '800',
+                  fontSize: '0.9rem',
+                  boxShadow: '0 2px 8px rgba(239, 68, 68, 0.1)'
+                }}>
+                  🚨 COMANDA ELIMINADA<br/>
+                  <span style={{ fontSize: '0.78rem', fontWeight: '500', color: 'var(--text-secondary)', marginTop: '0.25rem', display: 'inline-block' }}>
+                    Por: {comandaData.eliminado_por || 'N/A'} el {comandaData.eliminado_fecha ? new Date(comandaData.eliminado_fecha).toLocaleString('es-CL') : ''}
+                  </span>
+                </div>
+              )}
               <h2 className="comanda-client-name">{comandaData.cliente}</h2>
               <div className="comanda-local-name">Calibre 25</div>
               <div className="comanda-ticket-number">Ticket N° {comandaData.ticket}</div>
@@ -6163,6 +6645,37 @@ function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {modalConfig.isOpen && (
+        <div className="custom-modal-overlay alert-modal-overlay">
+          <div className="custom-modal-card">
+            <div className="custom-modal-header">
+              <span className="custom-modal-icon">{modalConfig.isAlert ? '⚠️' : '❓'}</span>
+              <h3 className="custom-modal-title">{modalConfig.title}</h3>
+            </div>
+            <div className="custom-modal-body">
+              <p className="custom-modal-message">{modalConfig.message}</p>
+            </div>
+            <div className="custom-modal-actions">
+              {!modalConfig.isAlert && (
+                <button
+                  type="button"
+                  className="btn-secondary custom-modal-btn-cancel"
+                  onClick={modalConfig.onCancel}
+                >
+                  {modalConfig.cancelText}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-primary custom-modal-btn-confirm"
+                onClick={modalConfig.onConfirm}
+              >
+                {modalConfig.confirmText}
+              </button>
+            </div>
           </div>
         </div>
       )}

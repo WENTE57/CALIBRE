@@ -99,6 +99,29 @@ app.use(express.json()); // Permite procesar peticiones JSON
     `);
     console.log("✅ Tabla 'cierres_caja' asegurada.");
 
+    // 6.5 Asegurar tabla turnos y columna en pedidos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS turnos (
+        id SERIAL PRIMARY KEY,
+        fecha_hora_inicio TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        fecha_hora_fin TIMESTAMP,
+        usuario_inicio VARCHAR(100) NOT NULL,
+        usuario_fin VARCHAR(100),
+        activo BOOLEAN DEFAULT TRUE,
+        efectivo_inicial DECIMAL(10, 2) DEFAULT 0,
+        efectivo_final DECIMAL(10, 2) DEFAULT 0
+      )
+    `);
+    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS efectivo_inicial DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS efectivo_final DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS total_ventas DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS total_efectivo DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS total_tarjeta DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS diferencia DECIMAL(10, 2) DEFAULT 0");
+    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS observaciones TEXT");
+    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS turno_id INT REFERENCES turnos(id)");
+    console.log("✅ Tabla 'turnos' y columna 'turno_id' en pedidos aseguradas con campos de efectivo y arqueo.");
+
     // 7. Asegurar tablas de promociones
     await pool.query(`
       CREATE TABLE IF NOT EXISTS promociones (
@@ -146,6 +169,29 @@ app.use(express.json()); // Permite procesar peticiones JSON
     `);
     await pool.query("INSERT INTO configuracion (clave, valor) VALUES ('precio_envase', '300') ON CONFLICT (clave) DO NOTHING");
     console.log("✅ Tabla 'configuracion' asegurada.");
+
+    // Garantizar que la tabla productos y el producto 'Envase para llevar' existan
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS productos (
+        id SERIAL PRIMARY KEY,
+        nombre VARCHAR(150) UNIQUE NOT NULL,
+        precio DECIMAL(10, 2) NOT NULL,
+        imagen VARCHAR(255),
+        categoria VARCHAR(100) DEFAULT 'Otros',
+        activo BOOLEAN DEFAULT TRUE,
+        aplica_envase VARCHAR(20) DEFAULT 'heredar'
+      )
+    `);
+    const envaseProdRes = await pool.query("SELECT id FROM productos WHERE nombre = 'Envase para llevar'");
+    if (envaseProdRes.rows.length === 0) {
+      const configRes = await pool.query("SELECT valor FROM configuracion WHERE clave = 'precio_envase'");
+      const currentPrice = configRes.rows.length > 0 ? parseFloat(configRes.rows[0].valor) : 300;
+      await pool.query(
+        "INSERT INTO productos (nombre, precio, imagen, categoria, activo, aplica_envase) VALUES ('Envase para llevar', $1, '📦', 'Otros', true, 'no')",
+        [currentPrice]
+      );
+      console.log("✅ Producto 'Envase para llevar' creado automáticamente.");
+    }
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
@@ -176,10 +222,336 @@ app.put('/api/configuracion', async (req, res) => {
       'INSERT INTO configuracion (clave, valor) VALUES ($1, $2) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor',
       [clave, String(valor)]
     );
+    if (clave === 'precio_envase') {
+      await pool.query(
+        "UPDATE productos SET precio = $1 WHERE nombre = 'Envase para llevar'",
+        [parseFloat(valor) || 0]
+      );
+      console.log(`✅ Precio del producto 'Envase para llevar' actualizado a ${valor}.`);
+    }
     res.json({ success: true, message: 'Configuración actualizada con éxito.' });
   } catch (err) {
     console.error('Error en PUT /api/configuracion:', err.message);
     res.status(500).json({ success: false, message: 'Error al actualizar configuración.' });
+  }
+});
+
+// Endpoints del Sistema de Turnos
+app.get('/api/turnos/activo', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, fecha_hora_inicio, usuario_inicio, activo, efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final FROM turnos WHERE activo = TRUE LIMIT 1');
+    if (result.rows.length > 0) {
+      res.json({ success: true, activo: true, turno: result.rows[0] });
+    } else {
+      res.json({ success: true, activo: false, turno: null });
+    }
+  } catch (err) {
+    console.error('Error en GET /api/turnos/activo:', err.message);
+    res.status(500).json({ success: false, message: 'Error al verificar turno activo.' });
+  }
+});
+
+app.post('/api/turnos/iniciar', async (req, res) => {
+  const { usuario_inicio, efectivo_inicial } = req.body;
+  if (!usuario_inicio) {
+    return res.status(400).json({ success: false, message: 'El usuario de inicio es obligatorio.' });
+  }
+  if (efectivo_inicial === undefined || efectivo_inicial === null || isNaN(parseFloat(efectivo_inicial))) {
+    return res.status(400).json({ success: false, message: 'El efectivo inicial es obligatorio y debe ser un número.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Cerrar cualquier turno previo que haya quedado activo
+    await client.query(
+      'UPDATE turnos SET activo = FALSE, fecha_hora_fin = CURRENT_TIMESTAMP, usuario_fin = $1 WHERE activo = TRUE',
+      [usuario_inicio]
+    );
+    // Iniciar nuevo turno
+    const result = await client.query(
+      'INSERT INTO turnos (usuario_inicio, efectivo_inicial, activo) VALUES ($1, $2, TRUE) RETURNING id, fecha_hora_inicio, usuario_inicio, activo, efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final',
+      [usuario_inicio, parseFloat(efectivo_inicial)]
+    );
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Turno iniciado con éxito.', turno: result.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en POST /api/turnos/iniciar:', err.message);
+    res.status(500).json({ success: false, message: 'Error al iniciar turno.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/api/turnos/cerrar', async (req, res) => {
+  const { usuario_fin, efectivo_final, observaciones } = req.body;
+  if (!usuario_fin) {
+    return res.status(400).json({ success: false, message: 'El usuario de cierre es obligatorio.' });
+  }
+  if (efectivo_final === undefined || efectivo_final === null || isNaN(parseFloat(efectivo_final))) {
+    return res.status(400).json({ success: false, message: 'El efectivo final es obligatorio y debe ser un número.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Obtener el turno activo para saber su ID y efectivo_inicial
+    const activeRes = await client.query('SELECT id, efectivo_inicial::FLOAT as efectivo_inicial, DATE(fecha_hora_inicio) as fecha_inicio FROM turnos WHERE activo = TRUE LIMIT 1');
+    if (activeRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'No hay ningún turno activo para cerrar.' });
+    }
+
+    const activeShift = activeRes.rows[0];
+    const eFinal = parseFloat(efectivo_final);
+
+    // 2. Calcular ventas de este turno
+    const salesRes = await client.query(`
+      SELECT 
+        COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0)::FLOAT as total_tarjeta
+      FROM pedidos
+      WHERE turno_id = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
+    `, [activeShift.id]);
+
+    const sales = salesRes.rows[0];
+    const dif = eFinal - (activeShift.efectivo_inicial + sales.total_efectivo);
+
+    // 3. Cerrar el turno y guardar los datos del arqueo
+    const result = await client.query(`
+      UPDATE turnos 
+      SET 
+        activo = FALSE, 
+        fecha_hora_fin = CURRENT_TIMESTAMP, 
+        usuario_fin = $1, 
+        efectivo_final = $2,
+        total_ventas = $3,
+        total_efectivo = $4,
+        total_tarjeta = $5,
+        diferencia = $6,
+        observaciones = $7
+      WHERE id = $8
+      RETURNING id, fecha_hora_inicio, fecha_hora_fin, usuario_inicio, usuario_fin, 
+                efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final,
+                total_ventas::float as total_ventas, total_efectivo::float as total_efectivo,
+                total_tarjeta::float as total_tarjeta, diferencia::float as diferencia, observaciones
+    `, [usuario_fin, eFinal, sales.total_ventas, sales.total_efectivo, sales.total_tarjeta, dif, observaciones || '', activeShift.id]);
+
+    // 4. Actualizar/Sincronizar cierres_caja para la fecha del turno
+    const dateStr = activeShift.fecha_inicio.toISOString().split('T')[0];
+    
+    // Obtener los agregados de todos los turnos del día para guardar en cierres_caja
+    const aggregatedRes = await client.query(`
+      SELECT 
+        COALESCE(SUM(total_ventas), 0)::FLOAT as total_ventas,
+        COALESCE(SUM(total_efectivo), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(total_tarjeta), 0)::FLOAT as total_tarjeta,
+        COALESCE(SUM(efectivo_inicial), 0)::FLOAT as fondo_apertura,
+        COALESCE(SUM(efectivo_final), 0)::FLOAT as efectivo_real,
+        COALESCE(SUM(diferencia), 0)::FLOAT as diferencia,
+        STRING_AGG(CASE WHEN observaciones <> '' THEN observaciones ELSE NULL END, ' | ') as observaciones
+      FROM turnos
+      WHERE DATE(fecha_hora_inicio) = $1
+    `, [dateStr]);
+
+    const agg = aggregatedRes.rows[0];
+
+    await client.query(`
+      INSERT INTO cierres_caja (
+        fecha, cargado_por, total_ventas, total_efectivo, total_tarjeta, fondo_apertura, efectivo_real, diferencia, observaciones
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (fecha)
+      DO UPDATE SET
+        cierre_fecha_hora = CURRENT_TIMESTAMP,
+        cargado_por = EXCLUDED.cargado_por,
+        total_ventas = EXCLUDED.total_ventas,
+        total_efectivo = EXCLUDED.total_efectivo,
+        total_tarjeta = EXCLUDED.total_tarjeta,
+        fondo_apertura = EXCLUDED.fondo_apertura,
+        efectivo_real = EXCLUDED.efectivo_real,
+        diferencia = EXCLUDED.diferencia,
+        observaciones = EXCLUDED.observaciones
+    `, [
+      dateStr,
+      usuario_fin,
+      agg.total_ventas,
+      agg.total_efectivo,
+      agg.total_tarjeta,
+      agg.fondo_apertura,
+      agg.efectivo_real,
+      agg.diferencia,
+      agg.observaciones || ''
+    ]);
+
+    await client.query('COMMIT');
+
+    // Enviar correo de inventario de forma asíncrona al cerrar el turno
+    const { fork } = require('child_process');
+    const path = require('path');
+    try {
+      const scriptPath = path.join(__dirname, 'comando_gmail.js');
+      console.log(`[Backend] Enviando correo de inventario al cerrar turno: ${scriptPath}`);
+      const child = fork(scriptPath, [String(activeShift.id)], { env: { ...process.env } });
+      child.on('error', (err) => {
+        console.error('[Backend] Error al ejecutar comando_gmail.js al cerrar turno:', err);
+      });
+      child.on('exit', (code) => {
+        console.log(`[Backend] comando_gmail.js al cerrar turno finalizó con código: ${code}`);
+      });
+    } catch (err) {
+      console.error('[Backend] Error al iniciar el envío de correo al cerrar turno:', err.message);
+    }
+
+    res.json({ success: true, message: 'Turno cerrado y arqueo registrado con éxito.', turno: result.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en POST /api/turnos/cerrar:', err.message);
+    res.status(500).json({ success: false, message: 'Error al cerrar turno y registrar arqueo.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/turnos/arqueo/:id', async (req, res) => {
+  const { id } = req.params;
+  const { efectivo_final, observaciones } = req.body;
+
+  if (efectivo_final === undefined || efectivo_final === null || isNaN(parseFloat(efectivo_final))) {
+    return res.status(400).json({ success: false, message: 'El efectivo final es obligatorio y debe ser un número.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Obtener datos del turno
+    const shiftRes = await client.query('SELECT id, efectivo_inicial::FLOAT as efectivo_inicial, DATE(fecha_hora_inicio) as fecha_inicio, usuario_fin FROM turnos WHERE id = $1', [id]);
+    if (shiftRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'El turno especificado no existe.' });
+    }
+
+    const shift = shiftRes.rows[0];
+    const eFinal = parseFloat(efectivo_final);
+
+    // 2. Recalcular ventas
+    const salesRes = await client.query(`
+      SELECT 
+        COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0)::FLOAT as total_tarjeta
+      FROM pedidos
+      WHERE turno_id = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
+    `, [id]);
+
+    const sales = salesRes.rows[0];
+    const dif = eFinal - (shift.efectivo_inicial + sales.total_efectivo);
+
+    // 3. Actualizar turno
+    const result = await client.query(`
+      UPDATE turnos 
+      SET 
+        efectivo_final = $1,
+        diferencia = $2,
+        observaciones = $3
+      WHERE id = $4
+      RETURNING id, fecha_hora_inicio, fecha_hora_fin, usuario_inicio, usuario_fin, 
+                efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final,
+                total_ventas::float as total_ventas, total_efectivo::float as total_efectivo,
+                total_tarjeta::float as total_tarjeta, diferencia::float as diferencia, observaciones
+    `, [eFinal, dif, observaciones || '', id]);
+
+    // 4. Sincronizar cierres_caja
+    const dateStr = shift.fecha_inicio.toISOString().split('T')[0];
+    const aggregatedRes = await client.query(`
+      SELECT 
+        COALESCE(SUM(total_ventas), 0)::FLOAT as total_ventas,
+        COALESCE(SUM(total_efectivo), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(total_tarjeta), 0)::FLOAT as total_tarjeta,
+        COALESCE(SUM(efectivo_inicial), 0)::FLOAT as fondo_apertura,
+        COALESCE(SUM(efectivo_final), 0)::FLOAT as efectivo_real,
+        COALESCE(SUM(diferencia), 0)::FLOAT as diferencia,
+        STRING_AGG(CASE WHEN observaciones <> '' THEN observaciones ELSE NULL END, ' | ') as observaciones
+      FROM turnos
+      WHERE DATE(fecha_hora_inicio) = $1
+    `, [dateStr]);
+
+    const agg = aggregatedRes.rows[0];
+
+    await client.query(`
+      INSERT INTO cierres_caja (
+        fecha, cargado_por, total_ventas, total_efectivo, total_tarjeta, fondo_apertura, efectivo_real, diferencia, observaciones
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (fecha)
+      DO UPDATE SET
+        cierre_fecha_hora = CURRENT_TIMESTAMP,
+        cargado_por = EXCLUDED.cargado_por,
+        total_ventas = EXCLUDED.total_ventas,
+        total_efectivo = EXCLUDED.total_efectivo,
+        total_tarjeta = EXCLUDED.total_tarjeta,
+        fondo_apertura = EXCLUDED.fondo_apertura,
+        efectivo_real = EXCLUDED.efectivo_real,
+        diferencia = EXCLUDED.diferencia,
+        observaciones = EXCLUDED.observaciones
+    `, [
+      dateStr,
+      shift.usuario_fin || 'Sistema',
+      agg.total_ventas,
+      agg.total_efectivo,
+      agg.total_tarjeta,
+      agg.fondo_apertura,
+      agg.efectivo_real,
+      agg.diferencia,
+      agg.observaciones || ''
+    ]);
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Arqueo corregido con éxito.', turno: result.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en PUT /api/turnos/arqueo/:id:', err.message);
+    res.status(500).json({ success: false, message: 'Error al actualizar el arqueo del turno.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/turnos', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        t.id,
+        t.fecha_hora_inicio,
+        t.fecha_hora_fin,
+        t.usuario_inicio,
+        t.usuario_fin,
+        t.activo,
+        t.efectivo_inicial::float as efectivo_inicial,
+        t.efectivo_final::float as efectivo_final,
+        t.diferencia::float as diferencia,
+        t.observaciones,
+        COALESCE(SUM(p.total), 0)::float AS total_ventas,
+        COALESCE(SUM(p.monto_efectivo), 0)::float AS total_efectivo,
+        COALESCE(SUM(p.monto_debito), 0)::float AS total_debito,
+        COALESCE(SUM(p.monto_credito), 0)::float AS total_credito,
+        COALESCE(SUM(p.monto_envases), 0)::float AS total_envases,
+        COUNT(p.id)::int AS cantidad_pedidos
+      FROM turnos t
+      LEFT JOIN pedidos p ON p.turno_id = t.id AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
+      GROUP BY t.id, t.efectivo_inicial, t.efectivo_final, t.diferencia, t.observaciones
+      ORDER BY t.id DESC
+      LIMIT 10
+    `;
+    const result = await pool.query(query);
+    res.json({ success: true, turnos: result.rows });
+  } catch (err) {
+    console.error('Error en GET /api/turnos:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener turnos.' });
   }
 });
 
@@ -1180,7 +1552,8 @@ app.post('/api/pedidos', async (req, res) => {
     monto_credito,
     pago_mixto_detalle,
     cantidad_envases,
-    monto_envases
+    monto_envases,
+    turno_id
   } = req.body;
 
   if (!cliente_nombre || !total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
@@ -1212,9 +1585,18 @@ app.post('/api/pedidos', async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    // Resolver el turno activo
+    let finalTurnoId = parseInt(turno_id) || null;
+    if (!finalTurnoId) {
+      const activeShiftRes = await client.query('SELECT id FROM turnos WHERE activo = TRUE LIMIT 1');
+      if (activeShiftRes.rows.length > 0) {
+        finalTurnoId = activeShiftRes.rows[0].id;
+      }
+    }
+
     // 1. Insertar la cabecera del pedido
     const orderRes = await client.query(
-      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle, cantidad_envases, monto_envases) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, fecha_hora',
+      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle, cantidad_envases, monto_envases, turno_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, fecha_hora',
       [
         cliente_nombre.trim(), 
         total, 
@@ -1227,7 +1609,8 @@ app.post('/api/pedidos', async (req, res) => {
         finalCred, 
         pago_mixto_detalle ? String(pago_mixto_detalle).trim() : null,
         parseInt(cantidad_envases) || 0,
-        parseFloat(monto_envases) || 0
+        parseFloat(monto_envases) || 0,
+        finalTurnoId
       ]
     );
     const pedidoId = orderRes.rows[0].id;
@@ -1376,7 +1759,7 @@ app.get('/api/pedidos', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT p.id, p.cliente_nombre, p.total, p.fecha_hora, p.atendido_por, p.nota, p.tipo_entrega, p.tipo_transaccion,
-             p.monto_efectivo, p.monto_debito, p.monto_credito, p.pago_mixto_detalle, p.cantidad_envases, p.monto_envases,
+             p.monto_efectivo, p.monto_debito, p.monto_credito, p.pago_mixto_detalle, p.cantidad_envases, p.monto_envases, p.turno_id,
              COALESCE(
                json_agg(
                  json_build_object(
@@ -1384,7 +1767,9 @@ app.get('/api/pedidos', async (req, res) => {
                    'producto_id', dp.producto_id,
                    'nombre_producto', dp.nombre_producto,
                    'cantidad', dp.cantidad,
-                   'precio_unitario', dp.precio_unitario
+                   'precio_unitario', dp.precio_unitario,
+                   'promocion_id', dp.promocion_id,
+                   'productos_incluidos', dp.productos_incluidos
                  )
                ) FILTER (WHERE dp.id IS NOT NULL),
                '[]'
@@ -1404,6 +1789,46 @@ app.get('/api/pedidos', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al obtener el historial de pedidos.'
+    });
+  }
+});
+
+// Endpoint de Historial de Pedidos Eliminados
+app.get('/api/pedidos/eliminados', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT p.id, p.cliente_nombre, p.total, p.fecha_hora, p.atendido_por, p.nota, p.tipo_entrega, p.tipo_transaccion,
+             p.monto_efectivo, p.monto_debito, p.monto_credito, p.pago_mixto_detalle, p.cantidad_envases, p.monto_envases, p.turno_id,
+             p.eliminado_por, p.eliminado_fecha,
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', dp.id,
+                   'producto_id', dp.producto_id,
+                   'nombre_producto', dp.nombre_producto,
+                   'cantidad', dp.cantidad,
+                   'precio_unitario', dp.precio_unitario,
+                   'promocion_id', dp.promocion_id,
+                   'productos_incluidos', dp.productos_incluidos
+                 )
+               ) FILTER (WHERE dp.id IS NOT NULL),
+               '[]'
+             ) as productos
+      FROM pedidos p
+      LEFT JOIN pedido_productos dp ON p.id = dp.pedido_id
+      WHERE p.eliminado IS TRUE
+      GROUP BY p.id
+      ORDER BY p.eliminado_fecha DESC
+    `);
+    res.json({
+      success: true,
+      pedidos: result.rows
+    });
+  } catch (err) {
+    console.error('Error en GET /api/pedidos/eliminados:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener el historial de pedidos eliminados.'
     });
   }
 });
@@ -1487,7 +1912,7 @@ app.delete('/api/pedidos/:id', async (req, res) => {
                 [inc.producto_id]
               );
               for (const recipeItem of recipeRes.rows) {
-                const restoreAmount = parseFloat(recipeItem.cantidad) * (parseInt(inc.cantidad) || 1) * cantItem;
+                const restoreAmount = parseFloat(recipeItem.cantidad) * (parseInt(inc.cantidad) || 1);
                 await client.query(
                   'UPDATE ingredientes SET stock = stock + $1 WHERE id = $2',
                   [restoreAmount, recipeItem.ingrediente_id]
@@ -1534,10 +1959,15 @@ app.delete('/api/pedidos/:id', async (req, res) => {
 
 // Endpoint de Cierre de Caja del Día
 app.get('/api/informes/cierre', async (req, res) => {
-  const { fecha } = req.query; // YYYY-MM-DD
+  const { fecha, turno_id } = req.query; // YYYY-MM-DD, and optional turno_id
   if (!fecha) {
     return res.status(400).json({ success: false, message: 'La fecha es requerida.' });
   }
+
+  const useShift = (turno_id && turno_id !== 'all' && turno_id !== 'todos' && turno_id !== 'undefined');
+  const filterVal = useShift ? parseInt(turno_id, 10) : fecha;
+  const whereClause = useShift ? 'turno_id = $1' : 'DATE(fecha_hora) = $1';
+  const whereClauseP = useShift ? 'p.turno_id = $1' : 'DATE(p.fecha_hora) = $1';
 
   try {
     const result = await pool.query(`
@@ -1549,8 +1979,8 @@ app.get('/api/informes/cierre', async (req, res) => {
         COALESCE(SUM(CASE WHEN tipo_transaccion = 'Débito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_debito, 0) ELSE 0 END), 0)::FLOAT as total_debito,
         COALESCE(SUM(CASE WHEN tipo_transaccion = 'Crédito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_credito, 0) ELSE 0 END), 0)::FLOAT as total_credito
       FROM pedidos
-      WHERE DATE(fecha_hora) = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
-    `, [fecha]);
+      WHERE ${whereClause} AND (eliminado IS FALSE OR eliminado IS NULL)
+    `, [filterVal]);
 
     const row = result.rows[0];
     const total_ventas = row.total_ventas;
@@ -1569,10 +1999,10 @@ app.get('/api/informes/cierre', async (req, res) => {
         SUM(pp.cantidad * pp.precio_unitario)::INTEGER as total_pesos
       FROM pedidos p
       JOIN pedido_productos pp ON p.id = pp.pedido_id
-      WHERE DATE(p.fecha_hora) = $1 AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
+      WHERE ${whereClauseP} AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
       GROUP BY pp.nombre_producto
       ORDER BY cantidad_vendida DESC
-    `, [fecha]);
+    `, [filterVal]);
 
     // Consultar total de envases vendidos en el día (excluyendo comandas eliminadas)
     const envasesResult = await pool.query(`
@@ -1580,8 +2010,8 @@ app.get('/api/informes/cierre', async (req, res) => {
         COALESCE(SUM(cantidad_envases), 0)::INTEGER as cantidad,
         COALESCE(SUM(monto_envases), 0)::INTEGER as total_pesos
       FROM pedidos
-      WHERE DATE(fecha_hora) = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
-    `, [fecha]);
+      WHERE ${whereClause} AND (eliminado IS FALSE OR eliminado IS NULL)
+    `, [filterVal]);
 
     const envases_vendidos = envasesResult.rows[0] || { cantidad: 0, total_pesos: 0 };
 
@@ -1594,14 +2024,14 @@ app.get('/api/informes/cierre', async (req, res) => {
         pp.productos_incluidos
       FROM pedidos p
       JOIN pedido_productos pp ON p.id = pp.pedido_id
-      WHERE DATE(p.fecha_hora) = $1 
+      WHERE ${whereClauseP}
         AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
         AND (
           pp.promocion_id IS NOT NULL 
           OR pp.productos_incluidos IS NOT NULL 
           OR pp.nombre_producto IN (SELECT nombre FROM promociones)
         )
-    `, [fecha]);
+    `, [filterVal]);
 
     const mapaProdsPromo = {};
 
@@ -1615,7 +2045,7 @@ app.get('/api/informes/cierre', async (req, res) => {
         const promoQty = parseInt(row.promo_cantidad) || 1;
         for (const item of incluidos) {
           const nom = item.nombre_producto;
-          const cant = (parseInt(item.cantidad) || 1) * promoQty;
+          const cant = parseInt(item.cantidad) || 1;
           if (nom) {
             mapaProdsPromo[nom] = (mapaProdsPromo[nom] || 0) + cant;
           }
@@ -1753,13 +2183,27 @@ app.get('/api/informes/cierre', async (req, res) => {
         COALESCE(eliminado_por, 'Administrador') as eliminado_por, 
         TO_CHAR(eliminado_fecha, 'HH24:MI') as hora_eliminado
       FROM pedidos
-      WHERE DATE(fecha_hora) = $1 AND eliminado = TRUE
+      WHERE ${whereClause} AND eliminado = TRUE
       ORDER BY eliminado_fecha DESC
-    `, [fecha]);
+    `, [filterVal]);
 
     const comandas_eliminadas = eliminadasResult.rows;
     const cantidad_eliminadas = comandas_eliminadas.length;
     const monto_total_eliminado = comandas_eliminadas.reduce((acc, curr) => acc + (curr.total || 0), 0);
+
+    // Consultar el efectivo inicial sugerido del o los turnos
+    let efectivoInicialSugerido = 50000;
+    if (useShift) {
+      const shiftRes = await pool.query('SELECT COALESCE(efectivo_inicial, 0)::FLOAT as efectivo_inicial FROM turnos WHERE id = $1', [filterVal]);
+      if (shiftRes.rows.length > 0) {
+        efectivoInicialSugerido = shiftRes.rows[0].efectivo_inicial;
+      }
+    } else {
+      const shiftRes = await pool.query('SELECT COALESCE(SUM(efectivo_inicial), 0)::FLOAT as efectivo_inicial FROM turnos WHERE DATE(fecha_hora_inicio) = $1', [filterVal]);
+      if (shiftRes.rows.length > 0 && shiftRes.rows[0].efectivo_inicial > 0) {
+        efectivoInicialSugerido = shiftRes.rows[0].efectivo_inicial;
+      }
+    }
 
     res.json({
       success: true,
@@ -1779,7 +2223,8 @@ app.get('/api/informes/cierre', async (req, res) => {
         ingredientes_gastados,
         comandas_eliminadas,
         cantidad_eliminadas,
-        monto_total_eliminado
+        monto_total_eliminado,
+        efectivo_inicial_sugerido: efectivoInicialSugerido
       }
     });
   } catch (err) {

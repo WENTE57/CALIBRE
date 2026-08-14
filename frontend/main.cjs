@@ -13,9 +13,9 @@ function loadPrinterConfig() {
   try {
     if (fs.existsSync(printerConfigPath)) {
       const data = JSON.parse(fs.readFileSync(printerConfigPath, 'utf8'));
-      if (data && data.printerName) {
+      if (data && typeof data.printerName === 'string') {
         sewooPrinterName = data.printerName;
-        console.log(`[Electron Print] Impresora cargada desde config: "${sewooPrinterName}"`);
+        console.log(`[Electron Print] Impresora cargada desde config: "${sewooPrinterName || 'Predeterminada del Sistema'}"`);
         return true;
       }
     }
@@ -107,16 +107,22 @@ app.whenReady().then(() => {
 
       // Intentar cargar la guardada primero
       if (loadPrinterConfig()) {
+        if (!sewooPrinterName || sewooPrinterName.trim() === '') {
+          console.log('[Electron Print] Configuración activa: Usar Impresora Predeterminada del Sistema.');
+          return;
+        }
         const exists = printers.some(p => p.name === sewooPrinterName);
         if (exists) {
           console.log(`[Electron Print] Impresora configurada y confirmada en sistema: ${sewooPrinterName}`);
           return;
         } else {
-          console.log(`[Electron Print] Impresora configurada "${sewooPrinterName}" no está conectada actualmente.`);
+          console.log(`[Electron Print] Impresora configurada "${sewooPrinterName}" no está conectada actualmente. Se usará la predeterminada del sistema.`);
+          sewooPrinterName = '';
+          return;
         }
       }
 
-      // Si no hay guardada o no está conectada, auto-detectar
+      // Si no hay guardada previa (primera ejecución), auto-detectar
       const sewooPrinter = printers.find(p =>
         p.name.toUpperCase().includes('SLK-TL200') ||
         p.name.toUpperCase().includes('SLK') ||
@@ -129,7 +135,8 @@ app.whenReady().then(() => {
         console.log(`[Electron Print] Impresora de Tickets detectada de inmediato: ${sewooPrinterName}`);
         savePrinterConfig(sewooPrinterName);
       } else {
-        console.log('[Electron Print] No se detectó impresora de tickets específica al inicio, se usará la predeterminada.');
+        console.log('[Electron Print] No se detectó impresora de tickets específica al inicio, se usará la predeterminada del sistema.');
+        savePrinterConfig('');
       }
     } catch (e) {
       console.error('[Electron Print] Error al listar impresoras al inicio:', e);
@@ -159,6 +166,85 @@ app.on('will-quit', () => {
 // Cola de impresión secuencial para evitar conflictos en el spooler y garantizar que el auto-corte funcione en todos los tickets
 const printQueue = [];
 let isPrinting = false;
+
+async function resolvePrinterName(win) {
+  try {
+    const printers = await win.webContents.getPrintersAsync();
+    if (sewooPrinterName && sewooPrinterName.trim() !== '') {
+      const exists = printers.some(p => p.name === sewooPrinterName);
+      if (exists) {
+        return sewooPrinterName;
+      }
+      console.warn(`[Electron Print] Impresora configurada "${sewooPrinterName}" no fue encontrada en el sistema. Se usará la predeterminada.`);
+    }
+    const defaultPrinter = printers.find(p => p.isDefault);
+    if (defaultPrinter) {
+      return defaultPrinter.name;
+    }
+  } catch (e) {
+    console.error('[Electron Print] Error al obtener impresoras del sistema:', e);
+  }
+  return sewooPrinterName && sewooPrinterName.trim() !== '' ? sewooPrinterName : '';
+}
+
+async function printHtmlWindow(printWin, targetPrinterName) {
+  if (process.platform === 'linux') {
+    try {
+      const pdfBuffer = await printWin.webContents.printToPDF({
+        pageSize: { width: 3.15, height: 11 },
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
+        printBackground: true
+      });
+      const tempPdfPath = path.join(app.getPath('temp'), `comanda_${Date.now()}.pdf`);
+      fs.writeFileSync(tempPdfPath, pdfBuffer);
+
+      return new Promise((resolve) => {
+        const args = (targetPrinterName && targetPrinterName.trim() !== '')
+          ? ['-P', targetPrinterName, tempPdfPath]
+          : [tempPdfPath];
+
+        console.log(`[Electron Print Linux] Enviando impresión a lpr con argumentos:`, args);
+        const lprProc = spawn('lpr', args, { shell: false });
+
+        lprProc.on('close', (code) => {
+          console.log(`[Electron Print Linux] lpr finalizó con código: ${code}`);
+          try { fs.unlinkSync(tempPdfPath); } catch (e) {}
+          resolve(code === 0);
+        });
+
+        lprProc.on('error', (err) => {
+          console.error('[Electron Print Linux] Error al ejecutar lpr:', err);
+          try { fs.unlinkSync(tempPdfPath); } catch (e) {}
+          resolve(false);
+        });
+      });
+    } catch (err) {
+      console.error('[Electron Print Linux] Error al generar PDF para lpr:', err);
+      return false;
+    }
+  } else {
+    return new Promise((resolve) => {
+      const printOptions = {
+        silent: true,
+        printBackground: true,
+        margins: { marginType: 'none' }
+      };
+
+      if (targetPrinterName && targetPrinterName.trim() !== '') {
+        printOptions.deviceName = targetPrinterName;
+      }
+
+      printWin.webContents.print(printOptions, (success, errorType) => {
+        if (!success) {
+          console.error('[Electron Print] Error al imprimir:', errorType);
+        } else {
+          console.log('[Electron Print] Documento impreso con éxito.');
+        }
+        resolve(success);
+      });
+    });
+  }
+}
 
 async function processPrintQueue() {
   if (isPrinting || printQueue.length === 0) {
@@ -200,9 +286,14 @@ function getPromoSubItems(p) {
     ).trim();
   };
 
+  let prodsIncl = p.productos_incluidos;
+  if (typeof prodsIncl === 'string') {
+    try { prodsIncl = JSON.parse(prodsIncl); } catch (e) {}
+  }
+
   // 1. Si vienen productos_incluidos (formato guardado en BD / historial)
-  if (p.productos_incluidos && Array.isArray(p.productos_incluidos) && p.productos_incluidos.length > 0) {
-    const agrupados = p.productos_incluidos.reduce((acc, opt) => {
+  if (prodsIncl && Array.isArray(prodsIncl) && prodsIncl.length > 0) {
+    const agrupados = prodsIncl.reduce((acc, opt) => {
       const nom = getItemName(opt);
       if (nom && nom !== 'undefined') {
         const cant = parseInt(opt.cantidad) || 1;
@@ -276,7 +367,7 @@ function printTicketPromise(ticket) {
               <div style="font-weight: bold;">${p.nombre || 'Producto'}</div>
               ${subItemsHtml}
             </td>
-            <td style="text-align: right; vertical-align: top;">
+            <td style="text-align: right; padding-right: 1mm; vertical-align: top;">
               $${(parseFloat(p.precio) * p.cantidad).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
             </td>
           </tr>
@@ -295,7 +386,7 @@ function printTicketPromise(ticket) {
           <meta charset="utf-8">
           <style>
             @page {
-              size: 80mm auto;
+              size: 76mm 297mm;
               margin: 0;
             }
             * {
@@ -306,14 +397,14 @@ function printTicketPromise(ticket) {
               font-weight: bold !important;
             }
             html, body {
-              width: 58mm;
-              max-width: 58mm;
-              margin: 0 0 0 1mm;
-              padding: 1mm 0mm 25mm 0mm; /* 25mm de avance inferior para evitar corte de texto por la guillotina */
+              width: 68mm;
+              max-width: 68mm;
+              margin: 0 auto;
+              padding: 1mm 1mm 25mm 1mm; /* 25mm de avance inferior para evitar corte de texto por la guillotina */
               font-family: 'Courier New', Courier, monospace;
-              font-size: 10.5px;
+              font-size: 11.5px;
               background-color: #ffffff !important;
-              line-height: 1.2;
+              line-height: 1.25;
               overflow: hidden;
               word-wrap: break-word;
               overflow-wrap: break-word;
@@ -330,7 +421,7 @@ function printTicketPromise(ticket) {
               margin-bottom: 2mm;
             }
             .comanda-client-name {
-              font-size: 17px;
+              font-size: 18px;
               font-weight: bold;
               margin: 0 0 1mm 0;
               text-transform: uppercase;
@@ -339,21 +430,21 @@ function printTicketPromise(ticket) {
               word-break: break-word;
             }
             .comanda-local-name {
-              font-size: 11.5px;
+              font-size: 13px;
               font-weight: bold;
               margin-bottom: 1mm;
               text-transform: uppercase;
             }
             .comanda-ticket-number {
-              font-size: 13.5px;
+              font-size: 15px;
               font-weight: bold;
               display: inline-block;
-              padding: 1mm 2mm;
-              border: 1.5px solid #000000;
+              padding: 1mm 3mm;
+              border: 2px solid #000000;
               margin: 1mm 0 1.5mm 0;
             }
             .delivery-type {
-              font-size: 12.5px;
+              font-size: 14px;
               font-weight: bold;
               margin: 1mm 0;
               text-transform: uppercase;
@@ -361,7 +452,7 @@ function printTicketPromise(ticket) {
             .comanda-date-time {
               display: flex;
               justify-content: space-between;
-              font-size: 10px;
+              font-size: 11px;
               margin-top: 1.5mm;
             }
             .comanda-body {
@@ -371,7 +462,7 @@ function printTicketPromise(ticket) {
               width: 100%;
               table-layout: fixed;
               border-collapse: collapse;
-              font-size: 10px;
+              font-size: 11.5px;
             }
             .comanda-table th {
               border-bottom: 1.5px solid #000000;
@@ -395,7 +486,7 @@ function printTicketPromise(ticket) {
             }
             .comanda-note {
               font-style: italic;
-              font-size: 11.5px;
+              font-size: 12px;
               padding: 1.5mm;
               border: 1px dashed #000000;
               text-align: left;
@@ -413,13 +504,14 @@ function printTicketPromise(ticket) {
               align-items: center;
               margin-top: 1mm;
               width: 100%;
+              padding: 0 1mm;
             }
             .comanda-total-label {
-              font-size: 15px;
+              font-size: 16px;
               font-weight: bold;
             }
             .comanda-total-value {
-              font-size: 16px;
+              font-size: 17px;
               font-weight: bold;
             }
           </style>
@@ -441,8 +533,8 @@ function printTicketPromise(ticket) {
               <thead>
                 <tr>
                   <th style="width: 14%;">Cant</th>
-                  <th style="width: 60%;">Producto</th>
-                  <th style="width: 26%; text-align: right;">Precio</th>
+                  <th style="width: 54%;">Producto</th>
+                  <th style="width: 32%; text-align: right; padding-right: 1mm;">Precio</th>
                 </tr>
               </thead>
               <tbody>
@@ -496,43 +588,18 @@ function printTicketPromise(ticket) {
 
       printWin.webContents.once('did-finish-load', () => {
         // Pequeño delay para asegurar el renderizado completo del CSS antes de imprimir
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
-            console.log(`[Electron Print] Usando impresora cacheada: ${sewooPrinterName || 'Impresora Predeterminada del Sistema'}`);
-
-            const printOptions = {
-              silent: true,
-              printBackground: true,
-              margins: { marginType: 'none' },
-              pageSize: { width: 80000, height: 297000 }
-            };
-
-            if (sewooPrinterName && sewooPrinterName.trim() !== '') {
-              printOptions.deviceName = sewooPrinterName;
-            }
-
-            printWin.webContents.print(printOptions, (success, errorType) => {
-              if (!success) {
-                console.error('[Electron Print] Error al imprimir:', errorType);
-              } else {
-                console.log('[Electron Print] Ticket impreso con éxito.');
-              }
-
-              // Retardo para permitir que el spooler de Windows complete el envío
-              // del documento y se active el cortador (auto-cut) de la impresora Sewoo.
-              setTimeout(() => {
-                try {
-                  printWin.close();
-                } catch (e) { }
-                resolve(); // Resolvemos la promesa para continuar con el siguiente ticket de la cola
-              }, 1500);
-            });
+            const targetPrinterName = await resolvePrinterName(printWin);
+            console.log(`[Electron Print] Usando impresora para ticket: ${targetPrinterName || 'Predeterminada del Sistema'}`);
+            await printHtmlWindow(printWin, targetPrinterName);
           } catch (err) {
             console.error('[Electron Print] Error al imprimir ticket:', err);
-            try {
-              printWin.close();
-            } catch (e) { }
-            resolve();
+          } finally {
+            setTimeout(() => {
+              try { printWin.close(); } catch (e) {}
+              resolve();
+            }, 1000);
           }
         }, 50);
       });
@@ -624,7 +691,7 @@ function printReportPromise(report) {
           <meta charset="utf-8">
           <style>
             @page {
-              size: 80mm auto;
+              size: 76mm 297mm;
               margin: 0;
             }
             * {
@@ -635,14 +702,14 @@ function printReportPromise(report) {
               font-weight: bold !important;
             }
             html, body {
-              width: 58mm;
-              max-width: 58mm;
-              margin: 0 0 0 1mm;
-              padding: 1mm 0mm 5mm 0mm;
+              width: 68mm;
+              max-width: 68mm;
+              margin: 0 auto;
+              padding: 1mm 1mm 5mm 1mm;
               font-family: 'Courier New', Courier, monospace;
-              font-size: 10px;
+              font-size: 11px;
               background-color: #ffffff !important;
-              line-height: 1.15;
+              line-height: 1.2;
               overflow: hidden;
               word-wrap: break-word;
               overflow-wrap: break-word;
@@ -877,41 +944,18 @@ function printReportPromise(report) {
       printWin.loadURL(dataUrl);
 
       printWin.webContents.once('did-finish-load', () => {
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
-            console.log(`[Electron Print] Usando impresora para reporte: ${sewooPrinterName || 'Impresora Predeterminada del Sistema'}`);
-
-            const printOptions = {
-              silent: true,
-              printBackground: true,
-              margins: { marginType: 'none' },
-              pageSize: { width: 80000, height: 297000 }
-            };
-
-            if (sewooPrinterName && sewooPrinterName.trim() !== '') {
-              printOptions.deviceName = sewooPrinterName;
-            }
-
-            printWin.webContents.print(printOptions, (success, errorType) => {
-              if (!success) {
-                console.error('[Electron Print] Error al imprimir reporte:', errorType);
-              } else {
-                console.log('[Electron Print] Reporte impreso con éxito.');
-              }
-
-              setTimeout(() => {
-                try {
-                  printWin.close();
-                } catch (e) { }
-                resolve();
-              }, 1500);
-            });
+            const targetPrinterName = await resolvePrinterName(printWin);
+            console.log(`[Electron Print] Usando impresora para reporte: ${targetPrinterName || 'Predeterminada del Sistema'}`);
+            await printHtmlWindow(printWin, targetPrinterName);
           } catch (err) {
             console.error('[Electron Print] Error al imprimir reporte:', err);
-            try {
-              printWin.close();
-            } catch (e) { }
-            resolve();
+          } finally {
+            setTimeout(() => {
+              try { printWin.close(); } catch (e) {}
+              resolve();
+            }, 1000);
           }
         }, 50);
       });
@@ -962,8 +1006,6 @@ ipcMain.on('print-report', (event, report) => {
   printQueue.push(report);
   processPrintQueue();
 
-  // Enviar el inventario por correo de forma asíncrona
-  sendInventoryEmail();
 });
 
 ipcMain.handle('get-printers', async () => {

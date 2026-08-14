@@ -1657,6 +1657,10 @@ body.dark-theme .form-select option {
   animation: fadeIn 0.25s ease-out;
 }
 
+.alert-modal-overlay {
+  z-index: 20000 !important;
+}
+
 .custom-modal-card {
   background: var(--glass-bg);
   border: 1px solid rgba(255, 255, 255, 0.1);
