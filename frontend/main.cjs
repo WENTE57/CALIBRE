@@ -198,7 +198,29 @@ async function printHtmlWindow(printWin, targetPrinterName) {
       const tempPdfPath = path.join(app.getPath('temp'), `comanda_${Date.now()}.pdf`);
       fs.writeFileSync(tempPdfPath, pdfBuffer);
 
-      return new Promise((resolve) => {
+      return new Promise(async (resolve) => {
+        const cmdArgs = (targetPrinterName && targetPrinterName.trim() !== '') ? [targetPrinterName] : [];
+
+        const runCommand = (cmd, cArgs) => {
+          return new Promise((res) => {
+            try {
+              const p = spawn(cmd, cArgs, { shell: false });
+              p.on('close', () => res());
+              p.on('error', (err) => {
+                console.error(`[Electron Print Linux] Error al ejecutar ${cmd}:`, err);
+                res();
+              });
+            } catch (err) {
+              console.error(`[Electron Print Linux] Falló spawn de ${cmd}:`, err);
+              res();
+            }
+          });
+        };
+
+        // Habilitar y aceptar trabajos en CUPS antes de enviar lpr
+        await runCommand('cupsenable', cmdArgs);
+        await runCommand('cupsaccept', cmdArgs);
+
         const args = (targetPrinterName && targetPrinterName.trim() !== '')
           ? ['-P', targetPrinterName, tempPdfPath]
           : [tempPdfPath];
@@ -399,7 +421,7 @@ function printTicketPromise(ticket) {
             html, body {
               width: 68mm;
               max-width: 68mm;
-              margin: 0 auto;
+              margin: 0;
               padding: 1mm 1mm 25mm 1mm; /* 25mm de avance inferior para evitar corte de texto por la guillotina */
               font-family: 'Courier New', Courier, monospace;
               font-size: 11.5px;
@@ -622,20 +644,13 @@ function printReportPromise(report) {
 
       if (report.tipo_reporte === 'consolidado') {
         const unificadosItems = report.productos_unificados || [];
-        const unificadosPairs = [];
-        for (let i = 0; i < unificadosItems.length; i += 2) {
-          const item1 = unificadosItems[i];
-          const item2 = unificadosItems[i + 1];
-          const col1 = item1 ? `<b>${item1.cantidad_total}</b> ${item1.nombre_producto}` : '';
-          const col2 = item2 ? `<b>${item2.cantidad_total}</b> ${item2.nombre_producto}` : '';
-          unificadosPairs.push(`
-            <tr>
-              <td style="width: 50%; padding: 0.4mm 1mm 0.4mm 0; word-break: break-word; font-size: 11px; border-bottom: none;">${col1}</td>
-              <td style="width: 50%; padding: 0.4mm 0 0.4mm 1mm; word-break: break-word; font-size: 11px; border-bottom: none;">${col2}</td>
-            </tr>
-          `);
-        }
-        const productosUnificadosRows = unificadosPairs.join('');
+        const productosUnificadosRows = unificadosItems.map(item => `
+          <tr>
+            <td style="width: 100%; padding: 0.6mm 0; word-break: break-word; font-size: 11px; border-bottom: 1px dotted #dddddd;">
+              <b>${item.cantidad_total}</b> ${item.nombre_producto}
+            </td>
+          </tr>
+        `).join('');
         const totalUnidadesCount = unificadosItems.reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0);
 
         html = `
@@ -658,7 +673,7 @@ function printReportPromise(report) {
               html, body {
                 width: 68mm;
                 max-width: 68mm;
-                margin: 0 auto;
+                margin: 0;
                 padding: 1mm 1mm 5mm 1mm;
                 font-family: 'Courier New', Courier, monospace;
                 font-size: 11px;
@@ -807,7 +822,7 @@ function printReportPromise(report) {
               html, body {
                 width: 68mm;
                 max-width: 68mm;
-                margin: 0 auto;
+                margin: 0;
                 padding: 1mm 1mm 5mm 1mm;
                 font-family: 'Courier New', Courier, monospace;
                 font-size: 11px;
