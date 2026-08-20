@@ -137,7 +137,34 @@ const run = async () => {
         ORDER BY p.eliminado_fecha DESC
       `, [shiftId]);
       deletedOrders = deletedRes.rows;
-      console.log(`INFO: Se encontraron ${deletedOrders.length} comandas eliminadas para el turno #${shiftId}.`);
+    }
+
+    // Obtener consumo interno / mermas del turno si existe
+    let shiftConsumptions = [];
+    if (shiftId) {
+      const consumRes = await pool.query(`
+        SELECT c.id, c.cantidad, c.fecha_hora, i.nombre as ingrediente_nombre
+        FROM consumos_inventario c
+        JOIN ingredientes i ON c.ingrediente_id = i.id
+        WHERE c.turno_id = $1
+        ORDER BY c.fecha_hora DESC
+      `, [shiftId]);
+      shiftConsumptions = consumRes.rows;
+      console.log(`INFO: Se encontraron ${shiftConsumptions.length} consumos/mermas registrados para el turno #${shiftId}.`);
+    }
+
+    // Obtener ingresos de materia prima del turno si existe
+    let shiftArrivals = [];
+    if (shiftId) {
+      const arrivalsRes = await pool.query(`
+        SELECT e.id, e.cantidad, e.fecha_hora, i.nombre as ingrediente_nombre
+        FROM entradas_inventario e
+        JOIN ingredientes i ON e.ingrediente_id = i.id
+        WHERE e.turno_id = $1
+        ORDER BY e.fecha_hora DESC
+      `, [shiftId]);
+      shiftArrivals = arrivalsRes.rows;
+      console.log(`INFO: Se encontraron ${shiftArrivals.length} ingresos de materia prima registrados para el turno #${shiftId}.`);
     }
 
     console.log('INFO: Iniciando consulta de inventario...');
@@ -189,7 +216,7 @@ const run = async () => {
           <tr style="border-bottom: 1px solid #eee;">
             <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: center; font-weight: bold; color: #dc2626;">#${order.id}</td>
             <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; font-size: 13px;">
-              <strong>${order.cliente_nombre}</strong><br/>
+              <strong>${order.cliente_nombre || 'Sin Nombre'}</strong><br/>
               <span style="font-size: 11px; color: #666;">${prodSummary}</span>
             </td>
             <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: right; font-weight: bold; font-size: 13px;">$${parseFloat(order.total).toLocaleString('es-CL')}</td>
@@ -227,6 +254,82 @@ const run = async () => {
       `;
     }
 
+    // 2.7 Construir sección de consumo interno / merma
+    let consumosHtml = '';
+    if (shiftConsumptions.length > 0) {
+      let consRows = '';
+      shiftConsumptions.forEach(item => {
+        const fechaConsStr = new Date(item.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+        consRows += `
+          <tr style="border-bottom: 1px solid #eee;">
+            <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif;">${item.ingrediente_nombre}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: right; font-weight: bold; color: #d97706;">${parseFloat(item.cantidad).toLocaleString('es-CL', { maximumFractionDigits: 2 })}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: center; color: #4b5563; font-size: 12px;">a las ${fechaConsStr}</td>
+          </tr>
+        `;
+      });
+
+      consumosHtml = `
+        <h3 style="color: #d97706; border-bottom: 2px solid #f59e0b; padding-bottom: 8px; margin-top: 30px; font-family: sans-serif;">📉 Consumo Interno / Mermas del Turno</h3>
+        <p style="color: #4b5563; font-size: 14px; font-family: sans-serif; margin-bottom: 10px;">Los siguientes ingredientes fueron descontados manualmente del inventario como consumo o merma durante este turno:</p>
+        <table style="border-collapse: collapse; width: 100%; margin-top: 10px; font-family: sans-serif;">
+          <thead>
+            <tr style="background-color: #fffbeb; border-bottom: 2px solid #fef3c7;">
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: left; color: #374151; font-size: 13px;">Ingrediente</th>
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #374151; font-size: 13px; width: 120px;">Cantidad Descontada</th>
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: center; color: #374151; font-size: 13px; width: 100px;">Hora</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${consRows}
+          </tbody>
+        </table>
+      `;
+    } else {
+      consumosHtml = `
+        <h3 style="color: #d97706; border-bottom: 2px solid #f59e0b; padding-bottom: 8px; margin-top: 30px; font-family: sans-serif;">📉 Consumo Interno / Mermas</h3>
+        <p style="color: #4b5563; font-size: 13px; font-style: italic; font-family: sans-serif; margin: 0;">No se registraron consumos o mermas manuales durante este turno.</p>
+      `;
+    }
+
+    // 2.8 Construir sección de ingreso de materia prima
+    let entradasHtml = '';
+    if (shiftArrivals.length > 0) {
+      let entRows = '';
+      shiftArrivals.forEach(item => {
+        const fechaEntStr = new Date(item.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+        entRows += `
+          <tr style="border-bottom: 1px solid #eee;">
+            <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif;">${item.ingrediente_nombre}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: right; font-weight: bold; color: #16a34a;">+${parseFloat(item.cantidad).toLocaleString('es-CL', { maximumFractionDigits: 2 })}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: center; color: #4b5563; font-size: 12px;">a las ${fechaEntStr}</td>
+          </tr>
+        `;
+      });
+
+      entradasHtml = `
+        <h3 style="color: #16a34a; border-bottom: 2px solid #22c55e; padding-bottom: 8px; margin-top: 30px; font-family: sans-serif;">📦 Materia Prima Ingresada en el Turno</h3>
+        <p style="color: #4b5563; font-size: 14px; font-family: sans-serif; margin-bottom: 10px;">Los siguientes ingredientes fueron ingresados manualmente al inventario durante este turno:</p>
+        <table style="border-collapse: collapse; width: 100%; margin-top: 10px; font-family: sans-serif;">
+          <thead>
+            <tr style="background-color: #f0fdf4; border-bottom: 2px solid #bbf7d0;">
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: left; color: #374151; font-size: 13px;">Ingrediente</th>
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: right; color: #374151; font-size: 13px; width: 120px;">Cantidad Ingresada</th>
+              <th style="padding: 10px; border: 1px solid #ddd; text-align: center; color: #374151; font-size: 13px; width: 100px;">Hora</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${entRows}
+          </tbody>
+        </table>
+      `;
+    } else {
+      entradasHtml = `
+        <h3 style="color: #16a34a; border-bottom: 2px solid #22c55e; padding-bottom: 8px; margin-top: 30px; font-family: sans-serif;">📦 Materia Prima Ingresada</h3>
+        <p style="color: #4b5563; font-size: 13px; font-style: italic; font-family: sans-serif; margin: 0;">No se registraron ingresos de materia prima durante este turno.</p>
+      `;
+    }
+
     const htmlBody = `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
         <h2 style="color: #111827; border-bottom: 2px solid #ff7a00; padding-bottom: 10px; margin-top: 0; font-family: sans-serif;">Reporte de Stock de Inventario</h2>
@@ -245,6 +348,10 @@ const run = async () => {
             ${tableRows}
           </tbody>
         </table>
+        
+        ${entradasHtml}
+        
+        ${consumosHtml}
         
         ${deletedTableHtml}
         

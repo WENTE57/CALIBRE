@@ -35,12 +35,13 @@ app.use(express.json()); // Permite procesar peticiones JSON
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pedidos (
         id SERIAL PRIMARY KEY,
-        cliente_nombre VARCHAR(100) NOT NULL,
+        cliente_nombre VARCHAR(100),
         total DECIMAL(10, 2) NOT NULL,
         fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         atendido_por VARCHAR(100) NOT NULL
       )
     `);
+    await pool.query("ALTER TABLE pedidos ALTER COLUMN cliente_nombre DROP NOT NULL");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nota TEXT");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_entrega VARCHAR(50) DEFAULT 'Servir'");
     await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_transaccion VARCHAR(50) DEFAULT 'Efectivo'");
@@ -139,9 +140,11 @@ app.use(express.json()); // Permite procesar peticiones JSON
         id SERIAL PRIMARY KEY,
         promocion_id INTEGER REFERENCES promociones(id) ON DELETE CASCADE,
         nombre_paso VARCHAR(150) NOT NULL,
-        obligatorio BOOLEAN DEFAULT TRUE
+        obligatorio BOOLEAN DEFAULT TRUE,
+        autocalcular BOOLEAN DEFAULT TRUE
       )
     `);
+    await pool.query("ALTER TABLE promocion_pasos ADD COLUMN IF NOT EXISTS autocalcular BOOLEAN DEFAULT TRUE");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS promocion_opciones (
         id SERIAL PRIMARY KEY,
@@ -192,6 +195,30 @@ app.use(express.json()); // Permite procesar peticiones JSON
       );
       console.log("✅ Producto 'Envase para llevar' creado automáticamente.");
     }
+
+    // 9. Asegurar tabla consumos_inventario
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS consumos_inventario (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        cantidad DECIMAL(10, 2) NOT NULL,
+        fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        turno_id INTEGER
+      )
+    `);
+    console.log("✅ Tabla 'consumos_inventario' asegurada.");
+
+    // 10. Asegurar tabla entradas_inventario
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS entradas_inventario (
+        id SERIAL PRIMARY KEY,
+        ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
+        cantidad DECIMAL(10, 2) NOT NULL,
+        fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        turno_id INTEGER
+      )
+    `);
+    console.log("✅ Tabla 'entradas_inventario' asegurada.");
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
@@ -733,13 +760,21 @@ app.get('/api/productos', async (req, res) => {
             )
           ) FILTER (WHERE i.id IS NOT NULL), 
           '[]'
-        ) AS ingredientes
+        ) AS ingredientes,
+        COALESCE(sales.total_ventas, 0) AS total_ventas
       FROM productos p
       LEFT JOIN producto_ingredientes pi ON p.id = pi.producto_id
       LEFT JOIN ingredientes i ON pi.ingrediente_id = i.id
+      LEFT JOIN (
+        SELECT pp.producto_id, SUM(pp.cantidad) AS total_ventas
+        FROM pedido_productos pp
+        JOIN pedidos ped ON pp.pedido_id = ped.id
+        WHERE ped.eliminado = false OR ped.eliminado IS NULL
+        GROUP BY pp.producto_id
+      ) sales ON p.id = sales.producto_id
       WHERE p.activo = true
-      GROUP BY p.id
-      ORDER BY p.id ASC;
+      GROUP BY p.id, sales.total_ventas
+      ORDER BY COALESCE(sales.total_ventas, 0) DESC, p.id ASC;
     `;
     const result = await pool.query(queryStr);
     res.json({
@@ -793,6 +828,7 @@ app.get('/api/promociones', async (req, res) => {
                 'id', pa.id,
                 'nombre_paso', pa.nombre_paso,
                 'obligatorio', pa.obligatorio,
+                'autocalcular', COALESCE(pa.autocalcular, true),
                 'opciones', COALESCE(
                   (
                     SELECT json_agg(
@@ -862,8 +898,8 @@ app.post('/api/promociones', async (req, res) => {
     if (pasos && Array.isArray(pasos)) {
       for (const paso of pasos) {
         const pasoRes = await client.query(
-          'INSERT INTO promocion_pasos (promocion_id, nombre_paso, obligatorio) VALUES ($1, $2, $3) RETURNING id',
-          [promoId, paso.nombre_paso.trim(), paso.obligatorio !== false]
+          'INSERT INTO promocion_pasos (promocion_id, nombre_paso, obligatorio, autocalcular) VALUES ($1, $2, $3, $4) RETURNING id',
+          [promoId, paso.nombre_paso.trim(), paso.obligatorio !== false, paso.autocalcular !== false]
         );
         const pasoId = pasoRes.rows[0].id;
         
@@ -926,8 +962,8 @@ app.put('/api/promociones/:id', async (req, res) => {
     if (pasos && Array.isArray(pasos)) {
       for (const paso of pasos) {
         const pasoRes = await client.query(
-          'INSERT INTO promocion_pasos (promocion_id, nombre_paso, obligatorio) VALUES ($1, $2, $3) RETURNING id',
-          [id, paso.nombre_paso.trim(), paso.obligatorio !== false]
+          'INSERT INTO promocion_pasos (promocion_id, nombre_paso, obligatorio, autocalcular) VALUES ($1, $2, $3, $4) RETURNING id',
+          [id, paso.nombre_paso.trim(), paso.obligatorio !== false, paso.autocalcular !== false]
         );
         const pasoId = pasoRes.rows[0].id;
         
@@ -1289,7 +1325,7 @@ app.put('/api/ingredientes/:id', async (req, res) => {
 // Endpoint para registrar llegada de materia prima (adicionar stock a un ingrediente)
 app.post('/api/ingredientes/:id/llegada', async (req, res) => {
   const { id } = req.params;
-  const { cantidad } = req.body;
+  const { cantidad, turno_id } = req.body;
   const cantidadNum = parseFloat(cantidad);
   if (isNaN(cantidadNum) || cantidadNum <= 0) {
     return res.status(400).json({
@@ -1298,26 +1334,92 @@ app.post('/api/ingredientes/:id/llegada', async (req, res) => {
     });
   }
   try {
+    await pool.query('BEGIN');
+
     const result = await pool.query(
       'UPDATE ingredientes SET stock = stock + $1 WHERE id = $2 RETURNING id, nombre, stock',
       [cantidadNum, id]
     );
     if (result.rows.length === 0) {
+      await pool.query('ROLLBACK');
       return res.status(404).json({
         success: false,
         message: 'El ingrediente no existe.'
       });
     }
+
+    let parsedTurnoId = parseInt(turno_id, 10);
+    if (isNaN(parsedTurnoId)) parsedTurnoId = null;
+
+    await pool.query(
+      'INSERT INTO entradas_inventario (ingrediente_id, cantidad, turno_id) VALUES ($1, $2, $3)',
+      [id, cantidadNum, parsedTurnoId]
+    );
+
+    await pool.query('COMMIT');
+
     res.json({
       success: true,
       message: `Llegada registrada: se añadieron ${cantidadNum} unidades a "${result.rows[0].nombre}".`,
       ingrediente: result.rows[0]
     });
   } catch (err) {
+    await pool.query('ROLLBACK');
     console.error('Error en POST /api/ingredientes/:id/llegada:', err.message);
     res.status(500).json({
       success: false,
       message: 'Error al registrar la llegada de materia prima.'
+    });
+  }
+});
+
+// Endpoint para registrar consumo interno / merma (descontar stock de un ingrediente)
+app.post('/api/ingredientes/:id/consumo', async (req, res) => {
+  const { id } = req.params;
+  const { cantidad, turno_id } = req.body;
+  const cantidadNum = parseFloat(cantidad);
+  if (isNaN(cantidadNum) || cantidadNum <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'La cantidad a descontar debe ser un número válido mayor a 0.'
+    });
+  }
+  try {
+    await pool.query('BEGIN');
+
+    const result = await pool.query(
+      'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2 RETURNING id, nombre, stock',
+      [cantidadNum, id]
+    );
+    if (result.rows.length === 0) {
+      await pool.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        message: 'El ingrediente no existe.'
+      });
+    }
+
+    let parsedTurnoId = parseInt(turno_id, 10);
+    if (isNaN(parsedTurnoId)) parsedTurnoId = null;
+
+    await pool.query(
+      'INSERT INTO consumos_inventario (ingrediente_id, cantidad, turno_id) VALUES ($1, $2, $3)',
+      [id, cantidadNum, parsedTurnoId]
+    );
+
+    await pool.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: `Consumo/Merma registrado: se descontaron ${cantidadNum} unidades de "${result.rows[0].nombre}".`,
+      ingrediente: result.rows[0]
+    });
+  } catch (err) {
+    await pool.query('ROLLBACK');
+    console.error('Error en POST /api/ingredientes/:id/consumo:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al registrar el consumo/merma.'
     });
   }
 });
@@ -1556,7 +1658,7 @@ app.post('/api/pedidos', async (req, res) => {
     turno_id
   } = req.body;
 
-  if (!cliente_nombre || !total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
+  if (!total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
     return res.status(400).json({
       success: false,
       message: 'Datos del pedido incompletos o inválidos.'
@@ -1598,7 +1700,7 @@ app.post('/api/pedidos', async (req, res) => {
     const orderRes = await client.query(
       'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle, cantidad_envases, monto_envases, turno_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, fecha_hora',
       [
-        cliente_nombre.trim(), 
+        cliente_nombre ? cliente_nombre.trim() : null, 
         total, 
         atendido_por.trim(), 
         nota ? nota.trim() : null, 
@@ -1946,7 +2048,7 @@ app.delete('/api/pedidos/:id', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Comanda Ticket #${id} del cliente "${orderRes.rows[0].cliente_nombre}" eliminada correctamente.`
+      message: `Comanda Ticket #${id} del cliente "${orderRes.rows[0].cliente_nombre || 'Sin Nombre'}" eliminada correctamente.`
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -2377,7 +2479,7 @@ app.get('/api/informes/excel', async (req, res) => {
         COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0)::FLOAT as total_tarjeta,
         COALESCE(SUM(total), 0)::FLOAT as total_ventas
       FROM pedidos
-      WHERE TO_CHAR(fecha_hora, 'YYYY-MM') = $1
+      WHERE TO_CHAR(fecha_hora, 'YYYY-MM') = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
       GROUP BY TO_CHAR(fecha_hora, 'YYYY-MM-DD')
       ORDER BY TO_CHAR(fecha_hora, 'YYYY-MM-DD') ASC
     `, [mes]);
@@ -2437,7 +2539,7 @@ app.get('/api/informes/rango-productos/excel', async (req, res) => {
         SUM(dp.cantidad * dp.precio_unitario)::FLOAT as total
       FROM pedidos p
       JOIN pedido_productos dp ON p.id = dp.pedido_id
-      WHERE DATE(p.fecha_hora) >= $1 AND DATE(p.fecha_hora) <= $2
+      WHERE DATE(p.fecha_hora) >= $1 AND DATE(p.fecha_hora) <= $2 AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
       GROUP BY dp.nombre_producto
       ORDER BY cantidad DESC
     `, [fecha_inicio, fecha_fin]);

@@ -2375,5 +2375,12 @@ body:not(.dark-theme) .search-input::placeholder {
   color: #734219 !important;
 }
 
+/* Corrección de Visibilidad del Calendario en Modo Oscuro */
+body.dark-theme input[type="date"]::-webkit-calendar-picker-indicator,
+body.dark-theme .form-input::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(0.95);
+  cursor: pointer;
+}
+
 
 

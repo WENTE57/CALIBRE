@@ -51,7 +51,7 @@ function createWindow() {
   const isDev = !app.isPackaged;
   if (isDev) {
     // En desarrollo, carga el servidor de Vite
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://127.0.0.1:5173');
     // Abre las herramientas de desarrollador
     mainWindow.webContents.openDevTools();
   } else {
@@ -540,7 +540,7 @@ function printTicketPromise(ticket) {
         </head>
         <body>
           <div class="comanda-header">
-            <h2 class="comanda-client-name">${ticket.cliente}</h2>
+            <h2 class="comanda-client-name">${ticket.cliente || 'Sin Nombre'}</h2>
             <div class="comanda-local-name">Calibre 25</div>
             <div class="comanda-ticket-number">Ticket N° ${ticket.ticket}</div>
             <div class="delivery-type">${tipoEntregaStr}</div>
@@ -945,7 +945,7 @@ function printReportPromise(report) {
               </div>
               ${report.comandas_eliminadas.map(c => `
                 <div style="font-size: 9.5px; border-bottom: 1px dotted #cccccc; padding: 0.5mm 0;">
-                  #${c.id} - ${c.cliente_nombre} ($${(c.total || 0).toLocaleString('es-CL')})<br/>
+                  #${c.id} - ${c.cliente_nombre || 'Sin Nombre'} ($${(c.total || 0).toLocaleString('es-CL')})<br/>
                   <span style="font-size: 8.5px; opacity: 0.8;">Anuló: ${c.eliminado_por} (${c.hora_eliminado || ''})</span>
                 </div>
               `).join('')}

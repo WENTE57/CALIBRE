@@ -233,7 +233,7 @@ const setup = async () => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pedidos (
         id SERIAL PRIMARY KEY,
-        cliente_nombre VARCHAR(100) NOT NULL,
+        cliente_nombre VARCHAR(100),
         total DECIMAL(10, 2) NOT NULL,
         fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         atendido_por VARCHAR(100) NOT NULL,
