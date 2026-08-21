@@ -1,7 +1,36 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import logoImg from './assets/logo.png';
-import { ComposedChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList } from 'recharts';
+import { LineChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList } from 'recharts';
+
+class ReportesErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    this.setState({ errorInfo });
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '2rem', backgroundColor: '#fef2f2', color: '#991b1b', borderRadius: '12px', margin: '2rem', border: '2px solid #f87171' }}>
+          <h2 style={{ marginBottom: '1rem' }}>💥 Ocurrió un error en la interfaz</h2>
+          <p style={{ fontWeight: 'bold' }}>{this.state.error?.toString()}</p>
+          <pre style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#fee2e2', borderRadius: '8px', overflowX: 'auto', fontSize: '0.85rem' }}>
+            {this.state.errorInfo?.componentStack}
+          </pre>
+          <button onClick={() => this.setState({ hasError: false })} style={{ marginTop: '1rem', padding: '0.5rem 1rem', background: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Intentar de nuevo</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Componente de Selección de Productos con Buscador por Teclado Integrado
 const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- Buscar o seleccionar producto --", style, id }) => {
@@ -6540,6 +6569,7 @@ function App() {
             )}
 
             {activeTab === 'reportes' && (
+              <ReportesErrorBoundary>
               <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   
@@ -6709,8 +6739,7 @@ function App() {
                         </div>
                       ) : reporteVentasDiarias && reporteVentasDiarias.length > 0 ? (
                         <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={reporteVentasDiarias} margin={{ top: 35, right: 65, left: 10, bottom: 10 }}>
+                            <LineChart width={800} height={300} data={reporteVentasDiarias} margin={{ top: 35, right: 65, left: 10, bottom: 10 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border, rgba(128,128,128,0.2))" vertical={false} />
                               <XAxis 
                                 dataKey="fecha" 
@@ -6720,17 +6749,26 @@ function App() {
                                 minTickGap={20} 
                                 tickFormatter={(value) => {
                                   if (!value) return '';
-                                  if (value.includes(':')) return `${value} hrs`;
-                                  if (value.length === 7) { // 2026-01
-                                    const [y, m] = value.split('-');
-                                    return new Date(y, parseInt(m)-1, 1).toLocaleDateString('es-CL', { month: 'short', year: '2-digit' }).replace('.', '');
+                                  const strValue = String(value);
+                                  if (strValue.includes(':')) return `${strValue} hrs`;
+                                  if (strValue.length === 7 && strValue.includes('-')) { // 2026-01
+                                    const [y, m] = strValue.split('-');
+                                    if (y && m) {
+                                      const d = new Date(y, parseInt(m)-1, 1);
+                                      if (!isNaN(d.getTime())) return d.toLocaleDateString('es-CL', { month: 'short', year: '2-digit' }).replace('.', '');
+                                    }
                                   }
-                                  if (value.length === 10) { // 2026-01-05
-                                    const [y, m, d] = value.split('-');
-                                    const dateStr = new Date(y, parseInt(m)-1, d).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' }).replace('.', '');
-                                    return agrupacionGrafico === 'semana' ? `Sem ${dateStr}` : dateStr;
+                                  if (strValue.length === 10 && strValue.includes('-')) { // 2026-01-05
+                                    const [y, m, d] = strValue.split('-');
+                                    if (y && m && d) {
+                                      const dateObj = new Date(y, parseInt(m)-1, d);
+                                      if (!isNaN(dateObj.getTime())) {
+                                        const dateStr = dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: 'short' }).replace('.', '');
+                                        return agrupacionGrafico === 'semana' ? `Sem ${dateStr}` : dateStr;
+                                      }
+                                    }
                                   }
-                                  return value;
+                                  return strValue;
                                 }}
                               />
                               <YAxis 
@@ -6742,13 +6780,11 @@ function App() {
                               <Tooltip 
                                 contentStyle={{ backgroundColor: 'var(--item-bg)', borderColor: 'var(--accent-primary)', borderWidth: '2px', borderRadius: '12px', color: 'var(--text-primary)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
                                 itemStyle={{ color: 'var(--accent-primary)', fontWeight: 'bold', fontSize: '1.1rem' }}
-                                formatter={(value) => [`$${value.toLocaleString('es-CL')}`, 'Total']}
+                                formatter={(value) => [`$${(Number(value) || 0).toLocaleString('es-CL')}`, 'Total']}
                                 labelFormatter={(label) => agrupacionGrafico === 'hora' || (fechaInicioReporte === fechaFinReporte && agrupacionGrafico === '') ? `Hora: ${label}` : agrupacionGrafico === 'semana' ? `Semana de: ${label}` : agrupacionGrafico === 'mes' ? `Mes: ${label}` : `Día: ${label}`}
                               />
-                              <Scatter dataKey="total_ventas" fill="var(--accent-primary)" />
-                              <Line type="monotone" dataKey="total_ventas" stroke="var(--accent-primary)" strokeWidth={3} dot={false} activeDot={{ r: 7, fill: 'var(--accent-primary)', stroke: 'var(--item-bg)', strokeWidth: 2 }} />
-                            </ComposedChart>
-                          </ResponsiveContainer>
+                              <Line type="monotone" dataKey="total_ventas" stroke="var(--accent-primary)" strokeWidth={3} dot={{ r: 4, fill: 'var(--accent-primary)', strokeWidth: 0 }} activeDot={{ r: 7, fill: 'var(--accent-primary)', stroke: 'var(--item-bg)', strokeWidth: 2 }} />
+                            </LineChart>
                         </div>
                       ) : (
                         <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -6933,6 +6969,7 @@ function App() {
 
                 </div>
               </div>
+              </ReportesErrorBoundary>
             )}
 
 
