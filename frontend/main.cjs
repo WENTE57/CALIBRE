@@ -401,6 +401,28 @@ function printTicketPromise(ticket) {
       const tipoEntregaStr = ticket.tipo_entrega === 'Llevar' ? 'PARA LLEVAR' : 'PARA SERVIR';
       const totalStr = ticket.total.toLocaleString('es-CL', { minimumFractionDigits: 0 });
 
+      const localNombre = ticket.local_nombre || 'Calibre 25';
+      const localDireccion = ticket.local_direccion || '';
+      const localTelefono = ticket.local_telefono || '';
+      const localPieTicket = ticket.local_pie_ticket || 'Gracias por su preferencia';
+      const impuestoIvaPorcentaje = parseFloat(ticket.impuesto_iva_porcentaje) || 0;
+      const impuestoIncluido = ticket.impuesto_incluido !== false;
+
+      let impuestoHtml = '';
+      if (impuestoIvaPorcentaje > 0) {
+        const totalNum = parseFloat(ticket.total) || 0;
+        const neto = impuestoIncluido
+          ? Math.round(totalNum / (1 + (impuestoIvaPorcentaje / 100)))
+          : Math.round(totalNum / (1 + (impuestoIvaPorcentaje / 100)));
+        const iva = totalNum - neto;
+        impuestoHtml = `
+          <div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: normal; margin-top: 1.5mm; border-top: 1px dashed #dddddd; padding-top: 1mm;">
+            <span>${impuestoIncluido ? 'IVA Incluido' : 'Neto'}:</span>
+            <span>$${iva.toLocaleString('es-CL')}</span>
+          </div>
+        `;
+      }
+
       const html = `
         <!DOCTYPE html>
         <html>
@@ -430,6 +452,7 @@ function printTicketPromise(ticket) {
               overflow: hidden;
               word-wrap: break-word;
               overflow-wrap: break-word;
+              overflow: hidden;
             }
             .text-center { text-align: center; }
             .text-right { text-align: right; }
@@ -541,7 +564,9 @@ function printTicketPromise(ticket) {
         <body>
           <div class="comanda-header">
             <h2 class="comanda-client-name">${ticket.cliente || '<span style="display:inline-block; width: 140px; height: 26px; border: 1.5px solid #000; border-radius: 4px; vertical-align: middle;"></span>'}</h2>
-            <div class="comanda-local-name">Calibre 25</div>
+            <div class="comanda-local-name">${localNombre}</div>
+            ${localDireccion ? `<div style="font-size: 10px; font-weight: normal; margin-bottom: 0.5mm;">📍 ${localDireccion}</div>` : ''}
+            ${localTelefono ? `<div style="font-size: 10px; font-weight: normal; margin-bottom: 1mm;">📞 Tel: ${localTelefono}</div>` : ''}
             <div class="comanda-ticket-number">Ticket N° ${ticket.ticket}</div>
             <div class="delivery-type">${tipoEntregaStr}</div>
             <div class="comanda-date-time">
@@ -583,11 +608,11 @@ function printTicketPromise(ticket) {
               <span class="comanda-total-label">TOTAL:</span>
               <span class="comanda-total-value">$${totalStr}</span>
             </div>
+            ${impuestoHtml}
           </div>
 
           <div class="text-center" style="font-size: 11px; margin-top: 4mm; border-top: 1px dashed #000000; padding-top: 2mm;">
-            <p style="margin: 2px 0;">Gracias por su preferencia</p>
-            <p style="margin: 2px 0;">Calibre 25</p>
+            ${localPieTicket.split('\n').map(line => `<p style="margin: 2px 0;">${line}</p>`).join('')}
           </div>
           <div style="height: 12mm;"></div>
         </body>
