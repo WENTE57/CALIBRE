@@ -2544,6 +2544,13 @@ app.get('/api/informes/rango-productos/excel', async (req, res) => {
       ORDER BY cantidad DESC
     `, [fecha_inicio, fecha_fin]);
 
+    const resultTotal = await pool.query(`
+      SELECT COALESCE(SUM(total), 0)::FLOAT as total_ventas 
+      FROM pedidos 
+      WHERE DATE(fecha_hora) >= $1 AND DATE(fecha_hora) <= $2 AND (eliminado IS FALSE OR eliminado IS NULL)
+    `, [fecha_inicio, fecha_fin]);
+    const totalVentasReal = resultTotal.rows[0].total_ventas;
+
     // Crear filas del reporte
     const rows = result.rows.map(r => ({
       'Producto': r.producto,
@@ -2560,7 +2567,8 @@ app.get('/api/informes/rango-productos/excel', async (req, res) => {
     } else {
       // Calcular sumas totales
       const sumaCantidad = result.rows.reduce((sum, r) => sum + r.cantidad, 0);
-      const sumaTotal = result.rows.reduce((sum, r) => sum + r.total, 0);
+      const sumaTotalProductos = result.rows.reduce((sum, r) => sum + r.total, 0);
+      const diferencia = totalVentasReal - sumaTotalProductos;
       
       // Fila vacía para separación estética
       rows.push({
@@ -2569,11 +2577,19 @@ app.get('/api/informes/rango-productos/excel', async (req, res) => {
         'Total Vendido ($)': ''
       });
 
+      if (Math.abs(diferencia) > 0) {
+        rows.push({
+          'Producto': 'Ajustes / Descuentos / Pedidos sin items',
+          'Cantidad Vendida': '',
+          'Total Vendido ($)': diferencia
+        });
+      }
+
       // Fila con los totales generales
       rows.push({
         'Producto': 'TOTAL GENERAL',
         'Cantidad Vendida': sumaCantidad,
-        'Total Vendido ($)': sumaTotal
+        'Total Vendido ($)': totalVentasReal
       });
     }
 
@@ -2645,6 +2661,69 @@ app.get('/api/informes/rango-resumen', async (req, res) => {
   }
 });
 
+// Endpoint para obtener ventas agrupadas por día (para gráficos)
+app.get('/api/informes/rango-ventas-diarias', async (req, res) => {
+  const { fecha_inicio, fecha_fin, agrupacion } = req.query;
+  if (!fecha_inicio || !fecha_fin) {
+    return res.status(400).json({ success: false, message: 'La fecha de inicio y la fecha de fin son requeridas.' });
+  }
+
+  try {
+    let query, params;
+    let groupExpr = `DATE(fecha_hora)`;
+    let selectExpr = `TO_CHAR(DATE(fecha_hora), 'YYYY-MM-DD')`;
+
+    if (agrupacion === 'mes') {
+      groupExpr = `DATE_TRUNC('month', fecha_hora)`;
+      selectExpr = `TO_CHAR(DATE_TRUNC('month', fecha_hora), 'YYYY-MM')`;
+    } else if (agrupacion === 'semana') {
+      groupExpr = `DATE_TRUNC('week', fecha_hora)`;
+      selectExpr = `TO_CHAR(DATE_TRUNC('week', fecha_hora), 'YYYY-MM-DD')`;
+    } else if (agrupacion === 'hora' || (fecha_inicio === fecha_fin && !agrupacion)) {
+      groupExpr = `TO_CHAR(fecha_hora, 'HH24:00')`;
+      selectExpr = `TO_CHAR(fecha_hora, 'HH24:00')`;
+    }
+
+    if (fecha_inicio === fecha_fin && selectExpr === `TO_CHAR(fecha_hora, 'HH24:00')`) {
+      // Si es un solo día y se agrupa por hora
+      query = `
+        SELECT 
+          ${selectExpr} as fecha,
+          COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+          COUNT(id)::INTEGER as cantidad_pedidos
+        FROM pedidos
+        WHERE DATE(fecha_hora) = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
+        GROUP BY ${groupExpr}
+        ORDER BY ${groupExpr} ASC
+      `;
+      params = [fecha_inicio];
+    } else {
+      // Para cualquier otro caso (rango de días)
+      query = `
+        SELECT 
+          ${selectExpr} as fecha,
+          COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+          COUNT(id)::INTEGER as cantidad_pedidos
+        FROM pedidos
+        WHERE DATE(fecha_hora) >= $1 AND DATE(fecha_hora) <= $2 AND (eliminado IS FALSE OR eliminado IS NULL)
+        GROUP BY ${groupExpr}
+        ORDER BY ${groupExpr} ASC
+      `;
+      params = [fecha_inicio, fecha_fin];
+    }
+
+    const result = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  } catch (err) {
+    console.error('Error en GET /api/informes/rango-ventas-diarias:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener ventas diarias.' });
+  }
+});
+
 // Endpoint de Obtener Ventas de Productos por Rango (JSON para vista previa)
 app.get('/api/informes/rango-productos-json', async (req, res) => {
   const { fecha_inicio, fecha_fin } = req.query;
@@ -2665,22 +2744,39 @@ app.get('/api/informes/rango-productos-json', async (req, res) => {
       ORDER BY cantidad DESC, total DESC
     `, [fecha_inicio, fecha_fin]);
 
+    const resultTotal = await pool.query(`
+      SELECT COALESCE(SUM(total), 0)::FLOAT as total_ventas 
+      FROM pedidos 
+      WHERE DATE(fecha_hora) >= $1 AND DATE(fecha_hora) <= $2 AND (eliminado IS FALSE OR eliminado IS NULL)
+    `, [fecha_inicio, fecha_fin]);
+    const totalVentasReal = resultTotal.rows[0].total_ventas;
+
     const sumaCantidad = result.rows.reduce((sum, r) => sum + r.cantidad, 0);
-    const sumaTotal = result.rows.reduce((sum, r) => sum + r.total, 0);
+    const sumaTotalProductos = result.rows.reduce((sum, r) => sum + r.total, 0);
+    const diferencia = totalVentasReal - sumaTotalProductos;
 
     const data = result.rows.map(r => ({
       producto: r.producto,
       cantidad: r.cantidad,
       total: r.total,
-      porcentaje: sumaTotal > 0 ? ((r.total / sumaTotal) * 100).toFixed(1) : '0'
+      porcentaje: totalVentasReal > 0 ? ((r.total / totalVentasReal) * 100).toFixed(1) : '0'
     }));
+
+    if (Math.abs(diferencia) > 0) {
+      data.push({
+        producto: 'Ajustes / Descuentos',
+        cantidad: 0,
+        total: diferencia,
+        porcentaje: totalVentasReal > 0 ? ((diferencia / totalVentasReal) * 100).toFixed(1) : '0'
+      });
+    }
 
     res.json({
       success: true,
       data,
       totales: {
         sumaCantidad,
-        sumaTotal
+        sumaTotal: totalVentasReal
       }
     });
   } catch (err) {

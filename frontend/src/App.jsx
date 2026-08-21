@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import logoImg from './assets/logo.png';
+import { ComposedChart, Line, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, LabelList } from 'recharts';
 
 // Componente de Selección de Productos con Buscador por Teclado Integrado
 const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- Buscar o seleccionar producto --", style, id }) => {
@@ -662,6 +663,8 @@ function App() {
   // Estados para Pestaña de Reportes
   const [reporteResumen, setReporteResumen] = useState(null);
   const [reporteProductos, setReporteProductos] = useState([]);
+  const [reporteVentasDiarias, setReporteVentasDiarias] = useState([]);
+  const [agrupacionGrafico, setAgrupacionGrafico] = useState('');
   const [loadingReportes, setLoadingReportes] = useState(false);
   const [errorReportes, setErrorReportes] = useState('');
   const [searchProductoReporte, setSearchProductoReporte] = useState('');
@@ -2406,19 +2409,24 @@ function App() {
     setLoadingReportes(true);
     setErrorReportes('');
     try {
-      const [resResumen, resProductos] = await Promise.all([
+      const [resResumen, resProductos, resDiarias] = await Promise.all([
         fetch(`http://127.0.0.1:5000/api/informes/rango-resumen?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`),
-        fetch(`http://127.0.0.1:5000/api/informes/rango-productos-json?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`)
+        fetch(`http://127.0.0.1:5000/api/informes/rango-productos-json?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`),
+        fetch(`http://127.0.0.1:5000/api/informes/rango-ventas-diarias?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}&agrupacion=${agrupacionGrafico}`)
       ]);
 
       const dataResumen = await resResumen.json();
       const dataProductos = await resProductos.json();
+      const dataDiarias = await resDiarias.json();
 
       if (dataResumen.success) {
         setReporteResumen(dataResumen.data);
       }
       if (dataProductos.success) {
         setReporteProductos(dataProductos.data);
+      }
+      if (dataDiarias.success) {
+        setReporteVentasDiarias(dataDiarias.data);
       }
     } catch (err) {
       console.error('Error al cargar datos de reportes:', err);
@@ -2432,7 +2440,7 @@ function App() {
     if (user && activeTab === 'reportes') {
       cargarReportesData();
     }
-  }, [user, activeTab, fechaInicioReporte, fechaFinReporte]);
+  }, [user, activeTab, fechaInicioReporte, fechaFinReporte, agrupacionGrafico]);
 
   useEffect(() => {
     if (user && activeTab === 'cierre') {
@@ -6282,17 +6290,6 @@ function App() {
                       <h3 className="section-title">📈 Reportes & Análisis de Ventas</h3>
                       <p className="section-subtitle">Consulta métricas clave en tiempo real, analiza el rendimiento de productos y descarga informes en Excel</p>
                     </div>
-
-                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        style={{ padding: '0.6rem 1.2rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem', borderRadius: '50px' }}
-                        onClick={descargarReporteProductosRango}
-                      >
-                        📥 Exportar Productos
-                      </button>
-                    </div>
                   </div>
 
                   {/* Barra de Filtros & Presets */}
@@ -6403,6 +6400,104 @@ function App() {
 
                     </div>
 
+                    {/* Gráfico de Ventas en el Tiempo */}
+                    <div className="report-panel" style={{ marginBottom: '1.5rem' }}>
+                      <div className="report-panel-header" style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                        <div>
+                          <h4 className="report-panel-title">📈 Ventas en el Tiempo</h4>
+                          <p className="report-panel-subtitle">Total de ventas {agrupacionGrafico === 'hora' || (fechaInicioReporte === fechaFinReporte && agrupacionGrafico === '') ? 'por hora' : agrupacionGrafico === 'semana' ? 'por semana' : agrupacionGrafico === 'mes' ? 'mensuales' : 'diarias'} en el período seleccionado</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', marginRight: '0.5rem', alignSelf: 'center' }}>Agrupar:</span>
+                          <button 
+                            type="button" 
+                            className="preset-chip"
+                            onClick={() => setAgrupacionGrafico(fechaInicioReporte === fechaFinReporte ? 'hora' : 'dia')}
+                            style={agrupacionGrafico === '' || agrupacionGrafico === 'dia' || (fechaInicioReporte === fechaFinReporte && agrupacionGrafico === 'hora') ? { backgroundColor: 'var(--accent-primary)', color: '#fff' } : {}}
+                          >
+                            {fechaInicioReporte === fechaFinReporte ? 'Por Hora' : 'Día'}
+                          </button>
+                          {fechaInicioReporte !== fechaFinReporte && (
+                            <>
+                              <button 
+                                type="button" 
+                                className="preset-chip"
+                                onClick={() => setAgrupacionGrafico('semana')}
+                                style={agrupacionGrafico === 'semana' ? { backgroundColor: 'var(--accent-primary)', color: '#fff' } : {}}
+                              >
+                                Semana
+                              </button>
+                              <button 
+                                type="button" 
+                                className="preset-chip"
+                                onClick={() => setAgrupacionGrafico('mes')}
+                                style={agrupacionGrafico === 'mes' ? { backgroundColor: 'var(--accent-primary)', color: '#fff' } : {}}
+                              >
+                                Mes
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {loadingReportes ? (
+                        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                          <div className="spinner"></div>
+                        </div>
+                      ) : errorReportes ? (
+                        <div className="alert alert-error">
+                          <span>{errorReportes}</span>
+                        </div>
+                      ) : reporteVentasDiarias && reporteVentasDiarias.length > 0 ? (
+                        <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={reporteVentasDiarias} margin={{ top: 35, right: 65, left: 10, bottom: 10 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border, rgba(128,128,128,0.2))" vertical={false} />
+                              <XAxis 
+                                dataKey="fecha" 
+                                stroke="var(--glass-border, rgba(128,128,128,0.2))" 
+                                tick={{ fill: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }} 
+                                tickMargin={12} 
+                                minTickGap={20} 
+                                tickFormatter={(value) => {
+                                  if (!value) return '';
+                                  if (value.includes(':')) return `${value} hrs`;
+                                  if (value.length === 7) { // 2026-01
+                                    const [y, m] = value.split('-');
+                                    return new Date(y, parseInt(m)-1, 1).toLocaleDateString('es-CL', { month: 'short', year: '2-digit' }).replace('.', '');
+                                  }
+                                  if (value.length === 10) { // 2026-01-05
+                                    const [y, m, d] = value.split('-');
+                                    const dateStr = new Date(y, parseInt(m)-1, d).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' }).replace('.', '');
+                                    return agrupacionGrafico === 'semana' ? `Sem ${dateStr}` : dateStr;
+                                  }
+                                  return value;
+                                }}
+                              />
+                              <YAxis 
+                                stroke="var(--glass-border, rgba(128,128,128,0.2))" 
+                                tick={{ fill: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }} 
+                                tickFormatter={(value) => `$${(value / 1000)}k`} 
+                                width={80} 
+                              />
+                              <Tooltip 
+                                contentStyle={{ backgroundColor: 'var(--item-bg)', borderColor: 'var(--accent-primary)', borderWidth: '2px', borderRadius: '12px', color: 'var(--text-primary)', boxShadow: '0 8px 32px rgba(0,0,0,0.6)' }}
+                                itemStyle={{ color: 'var(--accent-primary)', fontWeight: 'bold', fontSize: '1.1rem' }}
+                                formatter={(value) => [`$${value.toLocaleString('es-CL')}`, 'Total']}
+                                labelFormatter={(label) => agrupacionGrafico === 'hora' || (fechaInicioReporte === fechaFinReporte && agrupacionGrafico === '') ? `Hora: ${label}` : agrupacionGrafico === 'semana' ? `Semana de: ${label}` : agrupacionGrafico === 'mes' ? `Mes: ${label}` : `Día: ${label}`}
+                              />
+                              <Scatter dataKey="total_ventas" fill="var(--accent-primary)" />
+                              <Line type="monotone" dataKey="total_ventas" stroke="var(--accent-primary)" strokeWidth={3} dot={false} activeDot={{ r: 7, fill: 'var(--accent-primary)', stroke: 'var(--item-bg)', strokeWidth: 2 }} />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+                      ) : (
+                        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          No hay suficientes datos diarios para mostrar el gráfico en este período.
+                        </div>
+                      )}
+                    </div>
+
                     {/* Layout inferior (Tabla + Acciones) */}
                     <div className="reportes-layout-grid">
                       
@@ -6471,6 +6566,23 @@ function App() {
 
                       {/* Exportaciones & Acciones Rápidas */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                        {/* Exportar Productos del Rango */}
+                        <div className="report-panel">
+                          <div>
+                            <h4 className="report-panel-title">📦 Exportar Productos</h4>
+                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
+                              Descarga un Excel con todos los productos vendidos en el período que tienes seleccionado arriba.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '1rem', border: '1px solid var(--accent-primary)', color: 'var(--accent-primary)', backgroundColor: 'transparent' }}
+                            onClick={descargarReporteProductosRango}
+                          >
+                            📥 Descargar Productos del Período
+                          </button>
+                        </div>
                         
                         {/* Exportar Reporte Mensual */}
                         <div className="report-panel">
