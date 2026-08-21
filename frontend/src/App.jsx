@@ -6739,7 +6739,8 @@ function App() {
                         </div>
                       ) : reporteVentasDiarias && reporteVentasDiarias.length > 0 ? (
                         <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
-                            <LineChart width={800} height={300} data={reporteVentasDiarias} margin={{ top: 35, right: 65, left: 10, bottom: 10 }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={reporteVentasDiarias} margin={{ top: 35, right: 65, left: 10, bottom: 10 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border, rgba(128,128,128,0.2))" vertical={false} />
                               <XAxis 
                                 dataKey="fecha" 
@@ -6785,6 +6786,7 @@ function App() {
                               />
                               <Line type="monotone" dataKey="total_ventas" stroke="var(--accent-primary)" strokeWidth={3} dot={{ r: 4, fill: 'var(--accent-primary)', strokeWidth: 0 }} activeDot={{ r: 7, fill: 'var(--accent-primary)', stroke: 'var(--item-bg)', strokeWidth: 2 }} />
                             </LineChart>
+                          </ResponsiveContainer>
                         </div>
                       ) : (
                         <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
