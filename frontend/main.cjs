@@ -540,7 +540,7 @@ function printTicketPromise(ticket) {
         </head>
         <body>
           <div class="comanda-header">
-            <h2 class="comanda-client-name">${ticket.cliente || 'Sin Nombre'}</h2>
+            <h2 class="comanda-client-name">${ticket.cliente || '<span style="display:inline-block; width: 140px; height: 26px; border: 1.5px solid #000; border-radius: 4px; vertical-align: middle;"></span>'}</h2>
             <div class="comanda-local-name">Calibre 25</div>
             <div class="comanda-ticket-number">Ticket N° ${ticket.ticket}</div>
             <div class="delivery-type">${tipoEntregaStr}</div>

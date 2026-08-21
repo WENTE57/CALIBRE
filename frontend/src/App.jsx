@@ -659,6 +659,16 @@ function App() {
   const [loadingCierre, setLoadingCierre] = useState(false);
   const [errorCierre, setErrorCierre] = useState('');
   
+  // Estados para Pestaña de Reportes
+  const [reporteResumen, setReporteResumen] = useState(null);
+  const [reporteProductos, setReporteProductos] = useState([]);
+  const [loadingReportes, setLoadingReportes] = useState(false);
+  const [errorReportes, setErrorReportes] = useState('');
+  const [searchProductoReporte, setSearchProductoReporte] = useState('');
+  const [enviandoCorreoReporte, setEnviandoCorreoReporte] = useState(false);
+  const [mensajeCorreoReporte, setMensajeCorreoReporte] = useState('');
+  const [tipoMensajeCorreoReporte, setTipoMensajeCorreoReporte] = useState('success');
+  
   // Estados para Cuadrado de Caja (Arqueo)
   const [fondoApertura, setFondoApertura] = useState(50000);
   const [efectivoReal, setEfectivoReal] = useState('');
@@ -2195,12 +2205,12 @@ function App() {
 
 
   useEffect(() => {
-    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre' || activeTab === 'promociones' || activeTab === 'configuraciones')) {
+    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre' || activeTab === 'promociones' || activeTab === 'configuraciones' || activeTab === 'reportes')) {
       cargarIngredientes();
       cargarCategorias();
       cargarProductos();
       cargarPromociones();
-      if (activeTab === 'cierre' || activeTab === 'configuraciones') {
+      if (activeTab === 'cierre' || activeTab === 'configuraciones' || activeTab === 'reportes') {
         cargarConfiguracion();
         if (activeTab === 'cierre') {
           cargarHistorialTurnos();
@@ -2357,6 +2367,73 @@ function App() {
     window.open(`http://127.0.0.1:5000/api/informes/rango-productos/excel?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`);
   };
 
+  const aplicarPresetFecha = (preset) => {
+    const now = new Date();
+    const formatDate = (d) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    if (preset === 'hoy') {
+      setFechaInicioReporte(formatDate(now));
+      setFechaFinReporte(formatDate(now));
+    } else if (preset === 'ayer') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 1);
+      setFechaInicioReporte(formatDate(d));
+      setFechaFinReporte(formatDate(d));
+    } else if (preset === '7dias') {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 6);
+      setFechaInicioReporte(formatDate(d));
+      setFechaFinReporte(formatDate(now));
+    } else if (preset === 'esteMes') {
+      const d = new Date(now.getFullYear(), now.getMonth(), 1);
+      setFechaInicioReporte(formatDate(d));
+      setFechaFinReporte(formatDate(now));
+    } else if (preset === 'mesPasado') {
+      const inicio = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const fin = new Date(now.getFullYear(), now.getMonth(), 0);
+      setFechaInicioReporte(formatDate(inicio));
+      setFechaFinReporte(formatDate(fin));
+    }
+  };
+
+  const cargarReportesData = async () => {
+    if (!fechaInicioReporte || !fechaFinReporte) return;
+    setLoadingReportes(true);
+    setErrorReportes('');
+    try {
+      const [resResumen, resProductos] = await Promise.all([
+        fetch(`http://127.0.0.1:5000/api/informes/rango-resumen?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`),
+        fetch(`http://127.0.0.1:5000/api/informes/rango-productos-json?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`)
+      ]);
+
+      const dataResumen = await resResumen.json();
+      const dataProductos = await resProductos.json();
+
+      if (dataResumen.success) {
+        setReporteResumen(dataResumen.data);
+      }
+      if (dataProductos.success) {
+        setReporteProductos(dataProductos.data);
+      }
+    } catch (err) {
+      console.error('Error al cargar datos de reportes:', err);
+      setErrorReportes('Error de conexión al cargar los reportes.');
+    } finally {
+      setLoadingReportes(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && activeTab === 'reportes') {
+      cargarReportesData();
+    }
+  }, [user, activeTab, fechaInicioReporte, fechaFinReporte]);
+
   useEffect(() => {
     if (user && activeTab === 'cierre') {
       setFiltroTurnoCierre('all');
@@ -2431,10 +2508,6 @@ function App() {
 
   const handleSubmitPedido = async (e) => {
     e.preventDefault();
-    if (!clienteNombre.trim()) {
-      abrirAlerta('Por favor, ingresa el nombre del cliente para confirmar el pedido.', 'Nombre de Cliente Requerido');
-      return;
-    }
 
     const envasesInfo = calcularEnvases(pedido, tipoEntrega);
     const subtotalProductos = calcularSubtotalProductos(pedido);
@@ -2903,7 +2976,6 @@ function App() {
                     >
                       🎁 Promociones
                     </button>
-
                   </>
                 )}
                 <button 
@@ -2923,6 +2995,12 @@ function App() {
                   className={`nav-tab ${activeTab === 'cierre' ? 'active' : ''}`}
                 >
                   📊 Cierre
+                </button>
+                <button 
+                  onClick={() => setActiveTab('reportes')} 
+                  className={`nav-tab ${activeTab === 'reportes' ? 'active' : ''}`}
+                >
+                  📈 Reportes
                 </button>
                 <button 
                   onClick={() => setActiveTab('configuraciones')} 
@@ -5886,7 +5964,7 @@ function App() {
                           </div>
                         )}
 
-                        <form onSubmit={handleLlegadaMateriaPrima} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <form onSubmit={handleLlegadaMateriaPrima} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflow: 'visible' }}>
                           <div className="form-group" style={{ marginBottom: 0 }}>
                             <label className="form-label">Seleccionar Materia Prima</label>
                             <div style={{ position: 'relative', width: '100%' }}>
@@ -5913,25 +5991,26 @@ function App() {
                                   }
                                 }}
                                 disabled={llegadaLoading}
-                                onFocus={() => setLlegadaDropdownOpen(true)}
+                                onFocus={(e) => {
+                                  setLlegadaDropdownOpen(true);
+                                  const target = e.target;
+                                  setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                                }}
                                 onBlur={() => setTimeout(() => setLlegadaDropdownOpen(false), 250)}
                                 style={{ color: 'var(--text-primary)', background: 'var(--input-bg)' }}
                               />
                               {llegadaDropdownOpen && (
                                 <div style={{
-                                  position: 'absolute',
-                                  top: '100%',
-                                  left: 0,
-                                  right: 0,
+                                  position: 'relative',
+                                  width: '100%',
                                   zIndex: 100,
-                                  background: 'var(--glass-bg, #1a1515)',
-                                  backdropFilter: 'blur(10px)',
-                                  border: '1.5px solid var(--glass-border)',
+                                  background: '#31190d',
+                                  border: '1.5px solid var(--accent-primary)',
                                   borderRadius: '12px',
                                   maxHeight: '200px',
                                   overflowY: 'auto',
                                   marginTop: '4px',
-                                  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                                  boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
                                   padding: '4px'
                                 }}>
                                   {listaIngredientes
@@ -6013,7 +6092,7 @@ function App() {
                           </div>
                         )}
 
-                        <form onSubmit={handleConsumoMerma} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <form onSubmit={handleConsumoMerma} className="admin-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflow: 'visible' }}>
                           <div className="form-group" style={{ marginBottom: 0 }}>
                             <label className="form-label">Seleccionar Ingrediente</label>
                             <div style={{ position: 'relative', width: '100%' }}>
@@ -6040,25 +6119,26 @@ function App() {
                                   }
                                 }}
                                 disabled={consumoLoading}
-                                onFocus={() => setConsumoDropdownOpen(true)}
+                                onFocus={(e) => {
+                                  setConsumoDropdownOpen(true);
+                                  const target = e.target;
+                                  setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                                }}
                                 onBlur={() => setTimeout(() => setConsumoDropdownOpen(false), 250)}
                                 style={{ color: 'var(--text-primary)', background: 'var(--input-bg)' }}
                               />
                               {consumoDropdownOpen && (
                                 <div style={{
-                                  position: 'absolute',
-                                  top: '100%',
-                                  left: 0,
-                                  right: 0,
+                                  position: 'relative',
+                                  width: '100%',
                                   zIndex: 100,
-                                  background: 'var(--glass-bg, #1a1515)',
-                                  backdropFilter: 'blur(10px)',
-                                  border: '1.5px solid var(--glass-border)',
+                                  background: '#31190d',
+                                  border: '1.5px solid var(--accent-primary)',
                                   borderRadius: '12px',
                                   maxHeight: '200px',
                                   overflowY: 'auto',
                                   marginTop: '4px',
-                                  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                                  boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
                                   padding: '4px'
                                 }}>
                                   {listaIngredientes
@@ -6191,6 +6271,299 @@ function App() {
                 </div>
               </div>
             )}
+
+            {activeTab === 'reportes' && (
+              <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  
+                  {/* Header de la pestaña */}
+                  <div className="reportes-header">
+                    <div>
+                      <h3 className="section-title">📈 Reportes & Análisis de Ventas</h3>
+                      <p className="section-subtitle">Consulta métricas clave en tiempo real, analiza el rendimiento de productos y descarga informes en Excel</p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '0.6rem 1.2rem', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem', borderRadius: '50px' }}
+                        onClick={descargarReporteProductosRango}
+                      >
+                        📥 Exportar Productos
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Barra de Filtros & Presets */}
+                  <div className="reportes-filters-bar">
+                    {/* Presets Rápidos */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', marginRight: '0.5rem' }}>Presets:</span>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('hoy')}>Hoy</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('ayer')}>Ayer</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('7dias')}>Últimos 7 días</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('esteMes')}>Este Mes</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('mesPasado')}>Mes Pasado</button>
+                    </div>
+
+                    {/* Date Pickers */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Desde</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          style={{ padding: '0.5rem 0.8rem', fontSize: '0.85rem', width: '140px', borderRadius: '50px' }}
+                          value={fechaInicioReporte}
+                          onChange={(e) => setFechaInicioReporte(e.target.value)}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Hasta</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          style={{ padding: '0.5rem 0.8rem', fontSize: '0.85rem', width: '140px', borderRadius: '50px' }}
+                          value={fechaFinReporte}
+                          onChange={(e) => setFechaFinReporte(e.target.value)}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        style={{ padding: '0.5rem 1.2rem', fontSize: '0.85rem', borderRadius: '50px' }}
+                        onClick={cargarReportesData}
+                      >
+                        🔍 Filtrar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Contenido Principal de Reportes */}
+                  <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingRight: '0.5rem' }}>
+                    
+                    {/* Tarjetas de Métricas KPI */}
+                    <div className="kpi-grid">
+                      
+                      {/* Card Ventas Totales */}
+                      <div className="kpi-card kpi-primary">
+                        <span className="kpi-label">💰 Ventas Totales</span>
+                        <strong className="kpi-value">
+                          ${(reporteResumen?.total_ventas || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                        </strong>
+                        <span className="kpi-subtext">
+                          Período: {fechaInicioReporte} al {fechaFinReporte}
+                        </span>
+                      </div>
+
+                      {/* Card Efectivo */}
+                      <div className="kpi-card kpi-success">
+                        <span className="kpi-label">💵 Efectivo Recibido</span>
+                        <strong className="kpi-value">
+                          ${(reporteResumen?.total_efectivo || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                        </strong>
+                        <span className="kpi-subtext">
+                          {reporteResumen?.total_ventas > 0 ? `${(((reporteResumen?.total_efectivo || 0) / reporteResumen.total_ventas) * 100).toFixed(1)}% del total` : '0%'}
+                        </span>
+                      </div>
+
+                      {/* Card Tarjeta */}
+                      <div className="kpi-card kpi-info">
+                        <span className="kpi-label">💳 Débito & Crédito</span>
+                        <strong className="kpi-value">
+                          ${(reporteResumen?.total_tarjeta || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                        </strong>
+                        <span className="kpi-subtext">
+                          {reporteResumen?.total_ventas > 0 ? `${(((reporteResumen?.total_tarjeta || 0) / reporteResumen.total_ventas) * 100).toFixed(1)}% del total` : '0%'} | Débito: ${(reporteResumen?.total_debito || 0).toLocaleString('es-CL')} | Crédito: ${(reporteResumen?.total_credito || 0).toLocaleString('es-CL')}
+                        </span>
+                      </div>
+
+                      {/* Card Pedidos */}
+                      <div className="kpi-card kpi-primary">
+                        <span className="kpi-label">🛒 Pedidos</span>
+                        <strong className="kpi-value">
+                          {reporteResumen?.cantidad_pedidos || 0} <span style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-muted)' }}>órdenes</span>
+                        </strong>
+                        <span className="kpi-subtext">
+                          Comandas cerradas en el rango
+                        </span>
+                      </div>
+
+                      {/* Card Ticket Promedio */}
+                      <div className="kpi-card kpi-warning">
+                        <span className="kpi-label">📊 Ticket Promedio</span>
+                        <strong className="kpi-value">
+                          ${(reporteResumen?.ticket_promedio || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                        </strong>
+                        <span className="kpi-subtext">
+                          Venta promedio por orden
+                        </span>
+                      </div>
+
+                    </div>
+
+                    {/* Layout inferior (Tabla + Acciones) */}
+                    <div className="reportes-layout-grid">
+                      
+                      {/* Desglose de Medios de Pago */}
+                      <div className="report-panel">
+                        <div className="report-panel-header" style={{ marginBottom: '1.5rem' }}>
+                          <div>
+                            <h4 className="report-panel-title">📊 Medios de Pago</h4>
+                            <p className="report-panel-subtitle">Desglose porcentual por tipo de pago</p>
+                          </div>
+                        </div>
+
+                        {loadingReportes ? (
+                          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                            <div className="spinner"></div>
+                          </div>
+                        ) : errorReportes ? (
+                          <div className="alert alert-error">
+                            <span>{errorReportes}</span>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingRight: '0.5rem' }}>
+                            {/* Efectivo */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: '600', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  💵 Efectivo
+                                </span>
+                                <div style={{ textAlign: 'right' }}>
+                                  <span style={{ fontWeight: '800', color: 'var(--text-primary)' }}>${(reporteResumen?.total_efectivo || 0).toLocaleString('es-CL')}</span>
+                                  <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+                                    {reporteResumen?.total_ventas > 0 ? (((reporteResumen?.total_efectivo || 0) / reporteResumen.total_ventas) * 100).toFixed(1) : 0}%
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ width: '100%', background: 'var(--glass-border, rgba(128,128,128,0.2))', borderRadius: '50px', height: '10px', overflow: 'hidden' }}>
+                                <div style={{ width: `${reporteResumen?.total_ventas > 0 ? (((reporteResumen?.total_efectivo || 0) / reporteResumen.total_ventas) * 100) : 0}%`, background: 'var(--success, #10b981)', height: '100%', borderRadius: '50px', transition: 'width 1s ease-in-out' }}></div>
+                              </div>
+                            </div>
+
+                            {/* Tarjeta */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: '600', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  💳 Tarjeta (Débito & Crédito)
+                                </span>
+                                <div style={{ textAlign: 'right' }}>
+                                  <span style={{ fontWeight: '800', color: 'var(--text-primary)' }}>${(reporteResumen?.total_tarjeta || 0).toLocaleString('es-CL')}</span>
+                                  <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+                                    {reporteResumen?.total_ventas > 0 ? (((reporteResumen?.total_tarjeta || 0) / reporteResumen.total_ventas) * 100).toFixed(1) : 0}%
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{ width: '100%', background: 'var(--glass-border, rgba(128,128,128,0.2))', borderRadius: '50px', height: '10px', overflow: 'hidden', display: 'flex' }}>
+                                <div style={{ width: `${reporteResumen?.total_ventas > 0 ? (((reporteResumen?.total_debito || 0) / reporteResumen.total_ventas) * 100) : 0}%`, background: '#3b82f6', height: '100%', borderTopLeftRadius: '50px', borderBottomLeftRadius: '50px', transition: 'width 1s ease-in-out' }} title={`Débito: ${(reporteResumen?.total_debito || 0).toLocaleString('es-CL')}`}></div>
+                                <div style={{ width: `${reporteResumen?.total_ventas > 0 ? (((reporteResumen?.total_credito || 0) / reporteResumen.total_ventas) * 100) : 0}%`, background: 'var(--accent-primary)', height: '100%', borderTopRightRadius: '50px', borderBottomRightRadius: '50px', transition: 'width 1s ease-in-out' }} title={`Crédito: ${(reporteResumen?.total_credito || 0).toLocaleString('es-CL')}`}></div>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', fontWeight: '600' }}>
+                                <span style={{ color: '#3b82f6' }}>Débito: ${(reporteResumen?.total_debito || 0).toLocaleString('es-CL')}</span>
+                                <span style={{ color: 'var(--accent-primary)' }}>Crédito: ${(reporteResumen?.total_credito || 0).toLocaleString('es-CL')}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Exportaciones & Acciones Rápidas */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                        
+                        {/* Exportar Reporte Mensual */}
+                        <div className="report-panel">
+                          <div>
+                            <h4 className="report-panel-title">📅 Reporte Mensual</h4>
+                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
+                              Descarga una planilla Excel con el resumen diario de ventas del mes.
+                            </p>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Mes</label>
+                            <input
+                              type="month"
+                              className="form-input"
+                              style={{ padding: '0.6rem 1rem', fontSize: '0.9rem', borderRadius: '50px', color: 'var(--text-primary)', textAlign: 'center' }}
+                              value={mesExcel}
+                              onChange={(e) => setMesExcel(e.target.value)}
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '0.5rem' }}
+                            onClick={descargarExcelMensual}
+                          >
+                            📥 Descargar Excel Mensual
+                          </button>
+                        </div>
+
+                        {/* Envío de Reporte por Correo */}
+                        <div className="report-panel">
+                          <div>
+                            <h4 className="report-panel-title">📬 Envío por Correo</h4>
+                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
+                              Envía el reporte completo de inventario y existencias a:
+                            </p>
+                          </div>
+                          
+                          <div style={{ background: 'var(--item-bg)', border: '1px solid var(--glass-border)', padding: '0.75rem 1rem', borderRadius: '12px', fontSize: '0.85rem', color: 'var(--accent-primary)', fontWeight: '700', textAlign: 'center', wordBreak: 'break-all' }}>
+                            {configEmailTo || 'No configurado'}
+                          </div>
+
+                          {mensajeCorreoReporte && (
+                            <div className={`alert alert-${tipoMensajeCorreoReporte}`} style={{ padding: '0.6rem 1rem', fontSize: '0.85rem', margin: 0, borderRadius: '12px' }}>
+                              <span>{mensajeCorreoReporte}</span>
+                            </div>
+                          )}
+
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '0.5rem' }}
+                            disabled={enviandoCorreoReporte}
+                            onClick={async () => {
+                              try {
+                                setEnviandoCorreoReporte(true);
+                                setMensajeCorreoReporte('');
+                                const response = await fetch('http://127.0.0.1:5000/api/reportes/enviar', {
+                                  method: 'POST'
+                                });
+                                const data = await response.json();
+                                if (response.ok && data.success) {
+                                  setTipoMensajeCorreoReporte('success');
+                                  setMensajeCorreoReporte('¡Reporte enviado exitosamente!');
+                                } else {
+                                  setTipoMensajeCorreoReporte('error');
+                                  setMensajeCorreoReporte(data.message || 'Error al enviar el reporte.');
+                                }
+                              } catch (err) {
+                                console.error(err);
+                                setTipoMensajeCorreoReporte('error');
+                                setMensajeCorreoReporte('Error de red al intentar enviar el correo.');
+                              } finally {
+                                setEnviandoCorreoReporte(false);
+                              }
+                            }}
+                          >
+                            {enviandoCorreoReporte ? 'Enviando Reporte...' : '📧 Enviar Reporte Ahora'}
+                          </button>
+                        </div>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </div>
+              </div>
+            )}
+
 
 
 
@@ -6439,7 +6812,6 @@ function App() {
                     onSelectSuggestion={(sug) => setClienteNombre(sug)}
                     onChange={(val) => setClienteNombre(val)}
                     autoFocus
-                    required
                   />
                 </div>
 

@@ -216,7 +216,7 @@ const run = async () => {
           <tr style="border-bottom: 1px solid #eee;">
             <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: center; font-weight: bold; color: #dc2626;">#${order.id}</td>
             <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; font-size: 13px;">
-              <strong>${order.cliente_nombre || 'Sin Nombre'}</strong><br/>
+              <strong>${order.cliente_nombre ? order.cliente_nombre : '<span style="display:inline-block;width:120px;border-bottom:1px solid #000;"></span>'}</strong><br/>
               <span style="font-size: 11px; color: #666;">${prodSummary}</span>
             </td>
             <td style="padding: 8px; border: 1px solid #ddd; font-family: sans-serif; text-align: right; font-weight: bold; font-size: 13px;">$${parseFloat(order.total).toLocaleString('es-CL')}</td>

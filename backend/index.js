@@ -2599,6 +2599,96 @@ app.get('/api/informes/rango-productos/excel', async (req, res) => {
   }
 });
 
+// Endpoint de Obtener Resumen Estadístico por Rango de Fechas (JSON)
+app.get('/api/informes/rango-resumen', async (req, res) => {
+  const { fecha_inicio, fecha_fin } = req.query;
+  if (!fecha_inicio || !fecha_fin) {
+    return res.status(400).json({ success: false, message: 'La fecha de inicio y la fecha de fin son requeridas.' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT 
+        COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+        COUNT(id)::INTEGER as cantidad_pedidos,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Débito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_debito, 0) ELSE 0 END), 0)::FLOAT as total_debito,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Crédito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_credito, 0) ELSE 0 END), 0)::FLOAT as total_credito
+      FROM pedidos
+      WHERE DATE(fecha_hora) >= $1 AND DATE(fecha_hora) <= $2 AND (eliminado IS FALSE OR eliminado IS NULL)
+    `, [fecha_inicio, fecha_fin]);
+
+    const row = result.rows[0];
+    const total_ventas = row.total_ventas || 0;
+    const cantidad_pedidos = row.cantidad_pedidos || 0;
+    const total_efectivo = row.total_efectivo || 0;
+    const total_debito = row.total_debito || 0;
+    const total_credito = row.total_credito || 0;
+    const total_tarjeta = total_debito + total_credito;
+    const ticket_promedio = cantidad_pedidos > 0 ? Math.round(total_ventas / cantidad_pedidos) : 0;
+
+    res.json({
+      success: true,
+      data: {
+        total_ventas,
+        cantidad_pedidos,
+        total_efectivo,
+        total_debito,
+        total_credito,
+        total_tarjeta,
+        ticket_promedio
+      }
+    });
+  } catch (err) {
+    console.error('Error en GET /api/informes/rango-resumen:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener el resumen por rango.' });
+  }
+});
+
+// Endpoint de Obtener Ventas de Productos por Rango (JSON para vista previa)
+app.get('/api/informes/rango-productos-json', async (req, res) => {
+  const { fecha_inicio, fecha_fin } = req.query;
+  if (!fecha_inicio || !fecha_fin) {
+    return res.status(400).json({ success: false, message: 'La fecha de inicio y la fecha de fin son requeridas.' });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT 
+        dp.nombre_producto as producto,
+        SUM(dp.cantidad)::FLOAT as cantidad,
+        SUM(dp.cantidad * dp.precio_unitario)::FLOAT as total
+      FROM pedidos p
+      JOIN pedido_productos dp ON p.id = dp.pedido_id
+      WHERE DATE(p.fecha_hora) >= $1 AND DATE(p.fecha_hora) <= $2 AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
+      GROUP BY dp.nombre_producto
+      ORDER BY cantidad DESC, total DESC
+    `, [fecha_inicio, fecha_fin]);
+
+    const sumaCantidad = result.rows.reduce((sum, r) => sum + r.cantidad, 0);
+    const sumaTotal = result.rows.reduce((sum, r) => sum + r.total, 0);
+
+    const data = result.rows.map(r => ({
+      producto: r.producto,
+      cantidad: r.cantidad,
+      total: r.total,
+      porcentaje: sumaTotal > 0 ? ((r.total / sumaTotal) * 100).toFixed(1) : '0'
+    }));
+
+    res.json({
+      success: true,
+      data,
+      totales: {
+        sumaCantidad,
+        sumaTotal
+      }
+    });
+  } catch (err) {
+    console.error('Error en GET /api/informes/rango-productos-json:', err.message);
+    res.status(500).json({ success: false, message: 'Error al obtener el detalle de productos.' });
+  }
+});
+
 // Endpoint de Obtener Configuración
 app.get('/api/configuracion', async (req, res) => {
   try {
