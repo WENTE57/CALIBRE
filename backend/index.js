@@ -2068,8 +2068,8 @@ app.get('/api/informes/cierre', async (req, res) => {
 
   const useShift = (turno_id && turno_id !== 'all' && turno_id !== 'todos' && turno_id !== 'undefined');
   const filterVal = useShift ? parseInt(turno_id, 10) : fecha;
-  const whereClause = useShift ? 'turno_id = $1' : 'DATE(fecha_hora) = $1';
-  const whereClauseP = useShift ? 'p.turno_id = $1' : 'DATE(p.fecha_hora) = $1';
+  const whereClause = useShift ? 'turno_id = $1' : '(turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1) OR (turno_id IS NULL AND DATE(fecha_hora) = $1))';
+  const whereClauseP = useShift ? 'p.turno_id = $1' : '(p.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1) OR (p.turno_id IS NULL AND DATE(p.fecha_hora) = $1))';
 
   try {
     const result = await pool.query(`
