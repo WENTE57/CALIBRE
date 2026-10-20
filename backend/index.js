@@ -2,7 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const pool = require('./db');
 const XLSX = require('xlsx');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -11,55 +12,67 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json()); // Permite procesar peticiones JSON
 
+// Helper para evaluar valores booleanos viniendo de SQLite / Postgres / JSON
+const isOptionEnabled = (val, defaultVal = true) => {
+  if (val === undefined || val === null) return defaultVal;
+  if (val === false || val === 0 || val === '0' || val === 'false' || val === 'f' || val === 'FALSE') return false;
+  return true;
+};
+
 // Asegurar columnas y tablas en la base de datos de manera automatizada
 (async () => {
+  const safeAlter = async (sql) => { try { await pool.query(sql); } catch(e) {} };
   try {
-    // 1. Asegurar columna categoria y aplica_envase en productos
-    await pool.query("ALTER TABLE productos ADD COLUMN IF NOT EXISTS categoria VARCHAR(100) DEFAULT 'Otros'");
-    await pool.query("ALTER TABLE productos ADD COLUMN IF NOT EXISTS aplica_envase VARCHAR(20) DEFAULT 'heredar'");
-    console.log("✅ Columnas 'categoria' y 'aplica_envase' aseguradas en la tabla productos.");
+    // 1. Asegurar columna categoria y aplica_envase en productos (puede fallar si la tabla no existe aún)
+    try {
+      await safeAlter("ALTER TABLE productos ADD COLUMN categoria VARCHAR(100) DEFAULT 'Otros'");
+      await safeAlter("ALTER TABLE productos ADD COLUMN aplica_envase VARCHAR(20) DEFAULT 'heredar'");
+      console.log("✅ Columnas 'categoria' y 'aplica_envase' aseguradas en la tabla productos.");
+    } catch (e) {
+      console.log("⚠️ No se pudo alterar 'productos' (probablemente aún no existe). Se ignorará este error.");
+    }
 
     // 2. Asegurar tabla categorias y cobra_envase
     await pool.query(`
       CREATE TABLE IF NOT EXISTS categorias (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre VARCHAR(100) UNIQUE NOT NULL
       )
     `);
-    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🏷️'");
-    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS orden INT DEFAULT 0");
-    await pool.query("ALTER TABLE categorias ADD COLUMN IF NOT EXISTS cobra_envase BOOLEAN DEFAULT TRUE");
+    await safeAlter("ALTER TABLE categorias ADD COLUMN emoji VARCHAR(50) DEFAULT '🏷️'");
+    await safeAlter("ALTER TABLE categorias ADD COLUMN orden INT DEFAULT 0");
+    await safeAlter("ALTER TABLE categorias ADD COLUMN cobra_envase BOOLEAN DEFAULT TRUE");
     console.log("✅ Tabla 'categorias' asegurada.");
 
     // 3. Asegurar tabla pedidos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pedidos (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         cliente_nombre VARCHAR(100),
         total DECIMAL(10, 2) NOT NULL,
         fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         atendido_por VARCHAR(100) NOT NULL
       )
     `);
-    await pool.query("ALTER TABLE pedidos ALTER COLUMN cliente_nombre DROP NOT NULL");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS nota TEXT");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_entrega VARCHAR(50) DEFAULT 'Servir'");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS tipo_transaccion VARCHAR(50) DEFAULT 'Efectivo'");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_efectivo DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_debito DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_credito DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS pago_mixto_detalle TEXT");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cantidad_envases INT DEFAULT 0");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS monto_envases DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS eliminado BOOLEAN DEFAULT FALSE");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS eliminado_por VARCHAR(100)");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS eliminado_fecha TIMESTAMP");
+    await safeAlter("ALTER TABLE pedidos ALTER COLUMN cliente_nombre DROP NOT NULL");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN nota TEXT");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN tipo_entrega VARCHAR(50) DEFAULT 'Servir'");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN tipo_transaccion VARCHAR(50) DEFAULT 'Efectivo'");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN monto_efectivo DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN monto_debito DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN monto_credito DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN pago_mixto_detalle TEXT");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN cantidad_envases INT DEFAULT 0");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN monto_envases DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN eliminado BOOLEAN DEFAULT FALSE");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN eliminado_por VARCHAR(100)");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN eliminado_fecha TIMESTAMP");
     console.log("✅ Tabla 'pedidos' asegurada (con columnas de transacciones, envases y eliminación).");
 
     // 4. Asegurar tabla pedido_productos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pedido_productos (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         pedido_id INTEGER REFERENCES pedidos(id) ON DELETE CASCADE,
         producto_id INTEGER,
         nombre_producto VARCHAR(150) NOT NULL,
@@ -67,25 +80,19 @@ app.use(express.json()); // Permite procesar peticiones JSON
         precio_unitario DECIMAL(10, 2) NOT NULL
       )
     `);
-    await pool.query("ALTER TABLE pedido_productos ADD COLUMN IF NOT EXISTS promocion_id INT");
-    await pool.query("ALTER TABLE pedido_productos ADD COLUMN IF NOT EXISTS productos_incluidos JSONB");
-    console.log("✅ Tabla 'pedido_productos' asegurada (con promocion_id y productos_incluidos).");
+    await safeAlter("ALTER TABLE pedido_productos ADD COLUMN promocion_id INT");
+    await safeAlter("ALTER TABLE pedido_productos ADD COLUMN productos_incluidos TEXT");
+    await safeAlter("ALTER TABLE pedido_productos ADD COLUMN mostrar_nombre_ticket BOOLEAN DEFAULT TRUE");
+    console.log("✅ Tabla 'pedido_productos' asegurada (con promocion_id, productos_incluidos y mostrar_nombre_ticket).");
 
-    // 5. Asegurar tipo decimal para stock en ingredientes
-    await pool.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ingredientes') THEN
-          ALTER TABLE ingredientes ALTER COLUMN stock TYPE DECIMAL(10, 2);
-        END IF;
-      END $$;
-    `);
-    console.log("✅ Columna 'stock' en la tabla ingredientes asegurada como DECIMAL.");
+    // 5. Asegurar columna unidad y tipo decimal para stock en ingredientes
+    await safeAlter("ALTER TABLE ingredientes ADD COLUMN unidad VARCHAR(20) DEFAULT 'unidades'");
+    console.log("✅ Columna 'unidad' y 'stock' en la tabla ingredientes aseguradas.");
 
     // 6. Asegurar tabla cierres_caja
     await pool.query(`
       CREATE TABLE IF NOT EXISTS cierres_caja (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         fecha DATE UNIQUE NOT NULL,
         cierre_fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         cargado_por VARCHAR(100) NOT NULL,
@@ -103,7 +110,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
     // 6.5 Asegurar tabla turnos y columna en pedidos
     await pool.query(`
       CREATE TABLE IF NOT EXISTS turnos (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         fecha_hora_inicio TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         fecha_hora_fin TIMESTAMP,
         usuario_inicio VARCHAR(100) NOT NULL,
@@ -113,41 +120,46 @@ app.use(express.json()); // Permite procesar peticiones JSON
         efectivo_final DECIMAL(10, 2) DEFAULT 0
       )
     `);
-    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS efectivo_inicial DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS efectivo_final DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS total_ventas DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS total_efectivo DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS total_tarjeta DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS diferencia DECIMAL(10, 2) DEFAULT 0");
-    await pool.query("ALTER TABLE turnos ADD COLUMN IF NOT EXISTS observaciones TEXT");
-    await pool.query("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS turno_id INT REFERENCES turnos(id)");
-    console.log("✅ Tabla 'turnos' y columna 'turno_id' en pedidos aseguradas con campos de efectivo y arqueo.");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN efectivo_inicial DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN efectivo_final DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN total_ventas DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN total_efectivo DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN total_tarjeta DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN total_gastos DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN diferencia DECIMAL(10, 2) DEFAULT 0");
+    await safeAlter("ALTER TABLE turnos ADD COLUMN observaciones TEXT");
+    await safeAlter("ALTER TABLE pedidos ADD COLUMN turno_id INT REFERENCES turnos(id)");
+    console.log("✅ Tabla 'turnos' y columna 'turno_id' en pedidos aseguradas con campos de efectivo, gastos y arqueo.");
 
     // 7. Asegurar tablas de promociones
     await pool.query(`
       CREATE TABLE IF NOT EXISTS promociones (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre VARCHAR(150) UNIQUE NOT NULL,
         precio DECIMAL(10, 2) NOT NULL,
         activo BOOLEAN DEFAULT TRUE
       )
     `);
-    await pool.query("ALTER TABLE promociones ADD COLUMN IF NOT EXISTS emoji VARCHAR(50) DEFAULT '🎁'");
-    await pool.query("ALTER TABLE promociones ADD COLUMN IF NOT EXISTS aplica_envase VARCHAR(20) DEFAULT 'no'");
-    await pool.query("ALTER TABLE promociones ADD COLUMN IF NOT EXISTS cantidad_envases INT DEFAULT 1");
+    await safeAlter("ALTER TABLE promociones ADD COLUMN emoji VARCHAR(50) DEFAULT '🎁'");
+    await safeAlter("ALTER TABLE promociones ADD COLUMN aplica_envase VARCHAR(20) DEFAULT 'no'");
+    await safeAlter("ALTER TABLE promociones ADD COLUMN cantidad_envases INT DEFAULT 1");
+    await safeAlter("ALTER TABLE promociones ADD COLUMN topar_precio_individual BOOLEAN DEFAULT FALSE");
+    await safeAlter("ALTER TABLE promociones ADD COLUMN mostrar_nombre_ticket BOOLEAN DEFAULT TRUE");
+    await safeAlter("UPDATE promociones SET mostrar_nombre_ticket = TRUE WHERE mostrar_nombre_ticket IS NULL");
+    await safeAlter("UPDATE promocion_opciones SET precio_adicional = 0 WHERE precio_adicional < 0");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS promocion_pasos (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         promocion_id INTEGER REFERENCES promociones(id) ON DELETE CASCADE,
         nombre_paso VARCHAR(150) NOT NULL,
         obligatorio BOOLEAN DEFAULT TRUE,
         autocalcular BOOLEAN DEFAULT TRUE
       )
     `);
-    await pool.query("ALTER TABLE promocion_pasos ADD COLUMN IF NOT EXISTS autocalcular BOOLEAN DEFAULT TRUE");
+    await safeAlter("ALTER TABLE promocion_pasos ADD COLUMN autocalcular BOOLEAN DEFAULT TRUE");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS promocion_opciones (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         promocion_paso_id INTEGER REFERENCES promocion_pasos(id) ON DELETE CASCADE,
         producto_id INTEGER REFERENCES productos(id) ON DELETE CASCADE,
         precio_adicional DECIMAL(10, 2) DEFAULT 0.00
@@ -155,7 +167,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
     `);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS promocion_productos_fijos (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         promocion_id INTEGER REFERENCES promociones(id) ON DELETE CASCADE,
         producto_id INTEGER REFERENCES productos(id) ON DELETE CASCADE,
         cantidad INTEGER DEFAULT 1
@@ -176,7 +188,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
     // Garantizar que la tabla productos y el producto 'Envase para llevar' existan
     await pool.query(`
       CREATE TABLE IF NOT EXISTS productos (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre VARCHAR(150) UNIQUE NOT NULL,
         precio DECIMAL(10, 2) NOT NULL,
         imagen VARCHAR(255),
@@ -199,7 +211,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
     // 9. Asegurar tabla consumos_inventario
     await pool.query(`
       CREATE TABLE IF NOT EXISTS consumos_inventario (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
         cantidad DECIMAL(10, 2) NOT NULL,
         fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -211,7 +223,7 @@ app.use(express.json()); // Permite procesar peticiones JSON
     // 10. Asegurar tabla entradas_inventario
     await pool.query(`
       CREATE TABLE IF NOT EXISTS entradas_inventario (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         ingrediente_id INTEGER REFERENCES ingredientes(id) ON DELETE CASCADE,
         cantidad DECIMAL(10, 2) NOT NULL,
         fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -219,6 +231,65 @@ app.use(express.json()); // Permite procesar peticiones JSON
       )
     `);
     console.log("✅ Tabla 'entradas_inventario' asegurada.");
+    // 15b. Asegurar tablas de ingredientes (antes solo en seed.js)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ingredientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre VARCHAR(100) UNIQUE NOT NULL,
+        stock DECIMAL(10, 2) DEFAULT 0.00,
+        unidad VARCHAR(20) DEFAULT 'unidades'
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS producto_ingredientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL,
+        ingrediente_id INTEGER NOT NULL,
+        cantidad DECIMAL(10, 2) NOT NULL,
+        FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE,
+        FOREIGN KEY (ingrediente_id) REFERENCES ingredientes(id) ON DELETE CASCADE
+      )
+    `);
+
+    // 15.5. Crear tabla de gastos en efectivo si no existe
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS gastos_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        descripcion TEXT NOT NULL,
+        monto REAL NOT NULL,
+        fecha_hora TEXT DEFAULT (datetime('now', 'localtime')),
+        registrado_por TEXT,
+        turno_id INTEGER,
+        fecha TEXT
+      )
+    `);
+
+    // 16. Asegurar tabla usuarios y crear admin por defecto si no existe
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre VARCHAR(100) UNIQUE NOT NULL,
+        contrasena VARCHAR(255) NOT NULL,
+        cargo VARCHAR(50) DEFAULT 'Cajero'
+      )
+    `);
+    
+    // Verificar si hay algún usuario administrador
+    const resUsuarios = await pool.query("SELECT * FROM usuarios WHERE cargo = 'Administrador' OR nombre = 'admin'");
+    if (resUsuarios.rows.length === 0) {
+      console.log('No se encontró administrador, insertando usuario por defecto...');
+      await pool.query(`
+        INSERT INTO usuarios (nombre, contrasena, cargo)
+        VALUES ('admin', '123456', 'Administrador')
+      `);
+      console.log('✅ Usuario por defecto creado: admin / 123456');
+      
+      // Como es una base de datos nueva (no había admin), vamos a correr los seeds iniciales
+      console.log('Corriendo configuración inicial de base de datos (seeds)...');
+      const runSeed = require('./seed');
+      await runSeed();
+    }
+
   } catch (err) {
     console.error("❌ Error en la inicialización de la base de datos:", err.message);
   }
@@ -232,7 +303,7 @@ app.get('/api/configuracion', async (req, res) => {
     result.rows.forEach(row => {
       configObj[row.clave] = row.valor;
     });
-    res.json({ success: true, configuracion: configObj });
+    res.json({ success: true, configuracion: configObj, config: configObj });
   } catch (err) {
     console.error('Error en GET /api/configuracion:', err.message);
     res.status(500).json({ success: false, message: 'Error al obtener configuración.' });
@@ -250,11 +321,16 @@ app.put('/api/configuracion', async (req, res) => {
       [clave, String(valor)]
     );
     if (clave === 'precio_envase') {
+      const pVal = parseFloat(valor) || 0;
       await pool.query(
-        "UPDATE productos SET precio = $1 WHERE nombre = 'Envase para llevar'",
-        [parseFloat(valor) || 0]
+        "UPDATE productos SET precio = $1 WHERE id = 108 OR LOWER(nombre) LIKE '%envase para llevar%'",
+        [pVal]
       );
-      console.log(`✅ Precio del producto 'Envase para llevar' actualizado a ${valor}.`);
+      await pool.query(
+        "UPDATE envases SET precio = $1 WHERE id = 1 OR LOWER(nombre) LIKE '%envase%'",
+        [pVal]
+      );
+      console.log(`✅ Precio del producto 'Envase para llevar' y tabla envases actualizado a ${valor}.`);
     }
     res.json({ success: true, message: 'Configuración actualizada con éxito.' });
   } catch (err) {
@@ -292,12 +368,12 @@ app.post('/api/turnos/iniciar', async (req, res) => {
     await client.query('BEGIN');
     // Cerrar cualquier turno previo que haya quedado activo
     await client.query(
-      'UPDATE turnos SET activo = FALSE, fecha_hora_fin = CURRENT_TIMESTAMP, usuario_fin = $1 WHERE activo = TRUE',
+      "UPDATE turnos SET activo = FALSE, fecha_hora_fin = datetime('now', 'localtime'), usuario_fin = $1 WHERE activo = TRUE",
       [usuario_inicio]
     );
     // Iniciar nuevo turno
     const result = await client.query(
-      'INSERT INTO turnos (usuario_inicio, efectivo_inicial, activo) VALUES ($1, $2, TRUE) RETURNING id, fecha_hora_inicio, usuario_inicio, activo, efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final',
+      "INSERT INTO turnos (usuario_inicio, efectivo_inicial, activo, fecha_hora_inicio) VALUES ($1, $2, TRUE, datetime('now', 'localtime')) RETURNING id, fecha_hora_inicio, usuario_inicio, activo, efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final",
       [usuario_inicio, parseFloat(efectivo_inicial)]
     );
     await client.query('COMMIT');
@@ -325,7 +401,7 @@ app.post('/api/turnos/cerrar', async (req, res) => {
     await client.query('BEGIN');
 
     // 1. Obtener el turno activo para saber su ID y efectivo_inicial
-    const activeRes = await client.query('SELECT id, efectivo_inicial::FLOAT as efectivo_inicial, DATE(fecha_hora_inicio) as fecha_inicio FROM turnos WHERE activo = TRUE LIMIT 1');
+    const activeRes = await client.query("SELECT id, efectivo_inicial::FLOAT as efectivo_inicial, DATE(fecha_hora_inicio) as fecha_inicio FROM turnos WHERE activo = TRUE LIMIT 1");
     if (activeRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ success: false, message: 'No hay ningún turno activo para cerrar.' });
@@ -337,7 +413,7 @@ app.post('/api/turnos/cerrar', async (req, res) => {
     // 2. Calcular ventas de este turno
     const salesRes = await client.query(`
       SELECT 
-        COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+        COALESCE(SUM(CASE WHEN tipo_transaccion != 'Pedido Externo' THEN total ELSE 0 END), 0)::FLOAT as total_ventas,
         COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
         COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0)::FLOAT as total_tarjeta
       FROM pedidos
@@ -345,7 +421,17 @@ app.post('/api/turnos/cerrar', async (req, res) => {
     `, [activeShift.id]);
 
     const sales = salesRes.rows[0];
-    const dif = eFinal - (activeShift.efectivo_inicial + sales.total_efectivo);
+
+    // Consultar gastos en efectivo de este turno
+    const gastosRes = await client.query(`
+      SELECT COALESCE(SUM(monto), 0)::FLOAT as total_gastos
+      FROM gastos_caja
+      WHERE turno_id = $1
+    `, [activeShift.id]);
+    const totalGastos = gastosRes.rows[0]?.total_gastos || 0;
+
+    const expectedCash = (activeShift.efectivo_inicial || 0) + (sales.total_efectivo || 0) - totalGastos;
+    const dif = eFinal - expectedCash;
 
     // 3. Cerrar el turno y guardar los datos del arqueo
     const result = await client.query(`
@@ -358,79 +444,86 @@ app.post('/api/turnos/cerrar', async (req, res) => {
         total_ventas = $3,
         total_efectivo = $4,
         total_tarjeta = $5,
-        diferencia = $6,
-        observaciones = $7
-      WHERE id = $8
+        total_gastos = $6,
+        diferencia = $7,
+        observaciones = $8
+      WHERE id = $9
       RETURNING id, fecha_hora_inicio, fecha_hora_fin, usuario_inicio, usuario_fin, 
                 efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final,
                 total_ventas::float as total_ventas, total_efectivo::float as total_efectivo,
-                total_tarjeta::float as total_tarjeta, diferencia::float as diferencia, observaciones
-    `, [usuario_fin, eFinal, sales.total_ventas, sales.total_efectivo, sales.total_tarjeta, dif, observaciones || '', activeShift.id]);
+                total_tarjeta::float as total_tarjeta, total_gastos::float as total_gastos, diferencia::float as diferencia, observaciones
+    `, [usuario_fin, eFinal, sales.total_ventas, sales.total_efectivo, sales.total_tarjeta, totalGastos, dif, observaciones || '', activeShift.id]);
 
     // 4. Actualizar/Sincronizar cierres_caja para la fecha del turno
-    const dateStr = activeShift.fecha_inicio.toISOString().split('T')[0];
-    
-    // Obtener los agregados de todos los turnos del día para guardar en cierres_caja
-    const aggregatedRes = await client.query(`
-      SELECT 
-        COALESCE(SUM(total_ventas), 0)::FLOAT as total_ventas,
-        COALESCE(SUM(total_efectivo), 0)::FLOAT as total_efectivo,
-        COALESCE(SUM(total_tarjeta), 0)::FLOAT as total_tarjeta,
-        COALESCE(SUM(efectivo_inicial), 0)::FLOAT as fondo_apertura,
-        COALESCE(SUM(efectivo_final), 0)::FLOAT as efectivo_real,
-        COALESCE(SUM(diferencia), 0)::FLOAT as diferencia,
-        STRING_AGG(CASE WHEN observaciones <> '' THEN observaciones ELSE NULL END, ' | ') as observaciones
-      FROM turnos
-      WHERE DATE(fecha_hora_inicio) = $1
-    `, [dateStr]);
+    try {
+      const dateStr = typeof activeShift.fecha_inicio === 'string'
+        ? activeShift.fecha_inicio.split('T')[0].split(' ')[0]
+        : (activeShift.fecha_inicio ? activeShift.fecha_inicio.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+      
+      const aggregatedRes = await client.query(`
+        SELECT 
+          COALESCE(SUM(total_ventas), 0)::FLOAT as total_ventas,
+          COALESCE(SUM(total_efectivo), 0)::FLOAT as total_efectivo,
+          COALESCE(SUM(total_tarjeta), 0)::FLOAT as total_tarjeta,
+          COALESCE(SUM(efectivo_inicial), 0)::FLOAT as fondo_apertura,
+          COALESCE(SUM(efectivo_final), 0)::FLOAT as efectivo_real,
+          COALESCE(SUM(diferencia), 0)::FLOAT as diferencia,
+          GROUP_CONCAT(CASE WHEN observaciones <> '' THEN observaciones ELSE NULL END, ' | ') as observaciones
+        FROM turnos
+        WHERE DATE(fecha_hora_inicio) = $1
+      `, [dateStr]);
 
-    const agg = aggregatedRes.rows[0];
+      const agg = aggregatedRes.rows[0];
 
-    await client.query(`
-      INSERT INTO cierres_caja (
-        fecha, cargado_por, total_ventas, total_efectivo, total_tarjeta, fondo_apertura, efectivo_real, diferencia, observaciones
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (fecha)
-      DO UPDATE SET
-        cierre_fecha_hora = CURRENT_TIMESTAMP,
-        cargado_por = EXCLUDED.cargado_por,
-        total_ventas = EXCLUDED.total_ventas,
-        total_efectivo = EXCLUDED.total_efectivo,
-        total_tarjeta = EXCLUDED.total_tarjeta,
-        fondo_apertura = EXCLUDED.fondo_apertura,
-        efectivo_real = EXCLUDED.efectivo_real,
-        diferencia = EXCLUDED.diferencia,
-        observaciones = EXCLUDED.observaciones
-    `, [
-      dateStr,
-      usuario_fin,
-      agg.total_ventas,
-      agg.total_efectivo,
-      agg.total_tarjeta,
-      agg.fondo_apertura,
-      agg.efectivo_real,
-      agg.diferencia,
-      agg.observaciones || ''
-    ]);
+      await client.query(`
+        INSERT INTO cierres_caja (
+          fecha, cargado_por, total_ventas, total_efectivo, total_tarjeta, fondo_apertura, efectivo_real, diferencia, observaciones
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (fecha)
+        DO UPDATE SET
+          cierre_fecha_hora = CURRENT_TIMESTAMP,
+          cargado_por = EXCLUDED.cargado_por,
+          total_ventas = EXCLUDED.total_ventas,
+          total_efectivo = EXCLUDED.total_efectivo,
+          total_tarjeta = EXCLUDED.total_tarjeta,
+          fondo_apertura = EXCLUDED.fondo_apertura,
+          efectivo_real = EXCLUDED.efectivo_real,
+          diferencia = EXCLUDED.diferencia,
+          observaciones = EXCLUDED.observaciones
+      `, [
+        dateStr,
+        usuario_fin,
+        agg ? agg.total_ventas : sales.total_ventas,
+        agg ? agg.total_efectivo : sales.total_efectivo,
+        agg ? agg.total_tarjeta : sales.total_tarjeta,
+        agg ? agg.fondo_apertura : activeShift.efectivo_inicial,
+        agg ? agg.efectivo_real : eFinal,
+        agg ? agg.diferencia : dif,
+        (agg && agg.observaciones) || observaciones || ''
+      ]);
+    } catch (cierreErr) {
+      console.error('[Backend] Error al sincronizar cierres_caja al cerrar turno:', cierreErr.message);
+    }
 
     await client.query('COMMIT');
 
-    // Enviar correo de inventario de forma asíncrona al cerrar el turno
-    const { fork } = require('child_process');
-    const path = require('path');
+    // Enviar correo completo de fin de turno con arqueo, observaciones e inventario de forma asíncrona
     try {
-      const scriptPath = path.join(__dirname, 'comando_gmail.js');
-      console.log(`[Backend] Enviando correo de inventario al cerrar turno: ${scriptPath}`);
-      const child = fork(scriptPath, [String(activeShift.id)], { env: { ...process.env } });
-      child.on('error', (err) => {
-        console.error('[Backend] Error al ejecutar comando_gmail.js al cerrar turno:', err);
-      });
-      child.on('exit', (code) => {
-        console.log(`[Backend] comando_gmail.js al cerrar turno finalizó con código: ${code}`);
-      });
+      try {
+        delete require.cache[require.resolve('./comando_gmail.js')];
+      } catch (e) {}
+      const { run: runEnviarReporte } = require('./comando_gmail.js');
+      console.log(`[Backend] Iniciando envío de correo de fin de turno y arqueo para el turno #${activeShift.id}...`);
+      runEnviarReporte(activeShift.id)
+        .then(sent => {
+          console.log(`[Backend] Correo de fin de turno #${activeShift.id} enviado exitosamente: ${sent}`);
+        })
+        .catch(err => {
+          console.error(`[Backend] Error al enviar correo de fin de turno #${activeShift.id}:`, err);
+        });
     } catch (err) {
-      console.error('[Backend] Error al iniciar el envío de correo al cerrar turno:', err.message);
+      console.error('[Backend] Error al invocar el envío de correo al cerrar turno:', err.message);
     }
 
     res.json({ success: true, message: 'Turno cerrado y arqueo registrado con éxito.', turno: result.rows[0] });
@@ -456,7 +549,7 @@ app.put('/api/turnos/arqueo/:id', async (req, res) => {
     await client.query('BEGIN');
 
     // 1. Obtener datos del turno
-    const shiftRes = await client.query('SELECT id, efectivo_inicial::FLOAT as efectivo_inicial, DATE(fecha_hora_inicio) as fecha_inicio, usuario_fin FROM turnos WHERE id = $1', [id]);
+    const shiftRes = await client.query("SELECT id, efectivo_inicial::FLOAT as efectivo_inicial, DATE(fecha_hora_inicio) as fecha_inicio, usuario_fin FROM turnos WHERE id = $1", [id]);
     if (shiftRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ success: false, message: 'El turno especificado no existe.' });
@@ -468,7 +561,7 @@ app.put('/api/turnos/arqueo/:id', async (req, res) => {
     // 2. Recalcular ventas
     const salesRes = await client.query(`
       SELECT 
-        COALESCE(SUM(total), 0)::FLOAT as total_ventas,
+        COALESCE(SUM(CASE WHEN tipo_transaccion != 'Pedido Externo' THEN total ELSE 0 END), 0)::FLOAT as total_ventas,
         COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
         COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0)::FLOAT as total_tarjeta
       FROM pedidos
@@ -476,66 +569,84 @@ app.put('/api/turnos/arqueo/:id', async (req, res) => {
     `, [id]);
 
     const sales = salesRes.rows[0];
-    const dif = eFinal - (shift.efectivo_inicial + sales.total_efectivo);
+
+    // Consultar gastos en efectivo de este turno
+    const gastosRes = await client.query(`
+      SELECT COALESCE(SUM(monto), 0)::FLOAT as total_gastos
+      FROM gastos_caja
+      WHERE turno_id = $1
+    `, [id]);
+    const totalGastos = gastosRes.rows[0]?.total_gastos || 0;
+
+    const expectedCash = (shift.efectivo_inicial || 0) + (sales.total_efectivo || 0) - totalGastos;
+    const dif = eFinal - expectedCash;
 
     // 3. Actualizar turno
     const result = await client.query(`
       UPDATE turnos 
       SET 
         efectivo_final = $1,
-        diferencia = $2,
-        observaciones = $3
-      WHERE id = $4
+        total_gastos = $2,
+        diferencia = $3,
+        observaciones = $4
+      WHERE id = $5
       RETURNING id, fecha_hora_inicio, fecha_hora_fin, usuario_inicio, usuario_fin, 
                 efectivo_inicial::float as efectivo_inicial, efectivo_final::float as efectivo_final,
                 total_ventas::float as total_ventas, total_efectivo::float as total_efectivo,
-                total_tarjeta::float as total_tarjeta, diferencia::float as diferencia, observaciones
-    `, [eFinal, dif, observaciones || '', id]);
+                total_tarjeta::float as total_tarjeta, total_gastos::float as total_gastos, diferencia::float as diferencia, observaciones
+    `, [eFinal, totalGastos, dif, observaciones || '', id]);
 
     // 4. Sincronizar cierres_caja
-    const dateStr = shift.fecha_inicio.toISOString().split('T')[0];
-    const aggregatedRes = await client.query(`
-      SELECT 
-        COALESCE(SUM(total_ventas), 0)::FLOAT as total_ventas,
-        COALESCE(SUM(total_efectivo), 0)::FLOAT as total_efectivo,
-        COALESCE(SUM(total_tarjeta), 0)::FLOAT as total_tarjeta,
-        COALESCE(SUM(efectivo_inicial), 0)::FLOAT as fondo_apertura,
-        COALESCE(SUM(efectivo_final), 0)::FLOAT as efectivo_real,
-        COALESCE(SUM(diferencia), 0)::FLOAT as diferencia,
-        STRING_AGG(CASE WHEN observaciones <> '' THEN observaciones ELSE NULL END, ' | ') as observaciones
-      FROM turnos
-      WHERE DATE(fecha_hora_inicio) = $1
-    `, [dateStr]);
+    try {
+      const dateStr = typeof shift.fecha_inicio === 'string'
+        ? shift.fecha_inicio.split('T')[0].split(' ')[0]
+        : (shift.fecha_inicio ? shift.fecha_inicio.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
 
-    const agg = aggregatedRes.rows[0];
+      const aggregatedRes = await client.query(`
+        SELECT 
+          COALESCE(SUM(total_ventas), 0)::FLOAT as total_ventas,
+          COALESCE(SUM(total_efectivo), 0)::FLOAT as total_efectivo,
+          COALESCE(SUM(total_tarjeta), 0)::FLOAT as total_tarjeta,
+          COALESCE(SUM(efectivo_inicial), 0)::FLOAT as fondo_apertura,
+          COALESCE(SUM(efectivo_final), 0)::FLOAT as efectivo_real,
+          COALESCE(SUM(diferencia), 0)::FLOAT as diferencia,
+          GROUP_CONCAT(CASE WHEN observaciones <> '' THEN observaciones ELSE NULL END, ' | ') as observaciones
+        FROM turnos
+        WHERE DATE(fecha_hora_inicio) = $1
+      `, [dateStr]);
 
-    await client.query(`
-      INSERT INTO cierres_caja (
-        fecha, cargado_por, total_ventas, total_efectivo, total_tarjeta, fondo_apertura, efectivo_real, diferencia, observaciones
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (fecha)
-      DO UPDATE SET
-        cierre_fecha_hora = CURRENT_TIMESTAMP,
-        cargado_por = EXCLUDED.cargado_por,
-        total_ventas = EXCLUDED.total_ventas,
-        total_efectivo = EXCLUDED.total_efectivo,
-        total_tarjeta = EXCLUDED.total_tarjeta,
-        fondo_apertura = EXCLUDED.fondo_apertura,
-        efectivo_real = EXCLUDED.efectivo_real,
-        diferencia = EXCLUDED.diferencia,
-        observaciones = EXCLUDED.observaciones
-    `, [
-      dateStr,
-      shift.usuario_fin || 'Sistema',
-      agg.total_ventas,
-      agg.total_efectivo,
-      agg.total_tarjeta,
-      agg.fondo_apertura,
-      agg.efectivo_real,
-      agg.diferencia,
-      agg.observaciones || ''
-    ]);
+      const agg = aggregatedRes.rows[0];
+
+      await client.query(`
+        INSERT INTO cierres_caja (
+          fecha, cargado_por, total_ventas, total_efectivo, total_tarjeta, fondo_apertura, efectivo_real, diferencia, observaciones
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (fecha)
+        DO UPDATE SET
+          cierre_fecha_hora = CURRENT_TIMESTAMP,
+          cargado_por = EXCLUDED.cargado_por,
+          total_ventas = EXCLUDED.total_ventas,
+          total_efectivo = EXCLUDED.total_efectivo,
+          total_tarjeta = EXCLUDED.total_tarjeta,
+          fondo_apertura = EXCLUDED.fondo_apertura,
+          efectivo_real = EXCLUDED.efectivo_real,
+          diferencia = EXCLUDED.diferencia,
+          observaciones = EXCLUDED.observaciones
+      `, [
+        dateStr,
+        shift.usuario_fin || 'Sistema',
+        agg ? agg.total_ventas : 0,
+        agg ? agg.total_efectivo : 0,
+        agg ? agg.total_tarjeta : 0,
+        agg ? agg.fondo_apertura : 0,
+        agg ? agg.efectivo_real : eFinal,
+        agg ? agg.diferencia : dif,
+        (agg && agg.observaciones) || observaciones || ''
+      ]);
+    } catch (cierreErr) {
+      console.error('[Backend] Error al sincronizar cierres_caja al actualizar turno:', cierreErr.message);
+    }
 
     await client.query('COMMIT');
     res.json({ success: true, message: 'Arqueo corregido con éxito.', turno: result.rows[0] });
@@ -560,6 +671,7 @@ app.get('/api/turnos', async (req, res) => {
         t.activo,
         t.efectivo_inicial::float as efectivo_inicial,
         t.efectivo_final::float as efectivo_final,
+        COALESCE(t.total_gastos, (SELECT COALESCE(SUM(g.monto), 0) FROM gastos_caja g WHERE g.turno_id = t.id))::float AS total_gastos,
         t.diferencia::float as diferencia,
         t.observaciones,
         COALESCE(SUM(p.total), 0)::float AS total_ventas,
@@ -569,8 +681,8 @@ app.get('/api/turnos', async (req, res) => {
         COALESCE(SUM(p.monto_envases), 0)::float AS total_envases,
         COUNT(p.id)::int AS cantidad_pedidos
       FROM turnos t
-      LEFT JOIN pedidos p ON p.turno_id = t.id AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
-      GROUP BY t.id, t.efectivo_inicial, t.efectivo_final, t.diferencia, t.observaciones
+      LEFT JOIN pedidos p ON p.turno_id = t.id AND (p.eliminado IS FALSE OR eliminado IS NULL)
+      GROUP BY t.id, t.efectivo_inicial, t.efectivo_final, t.total_gastos, t.diferencia, t.observaciones
       ORDER BY t.id DESC
       LIMIT 10
     `;
@@ -779,7 +891,12 @@ app.get('/api/productos', async (req, res) => {
     const result = await pool.query(queryStr);
     res.json({
       success: true,
-      productos: result.rows
+      productos: result.rows.map(row => {
+        if (typeof row.ingredientes === 'string') {
+          try { row.ingredientes = JSON.parse(row.ingredientes); } catch (e) { row.ingredientes = []; }
+        }
+        return row;
+      })
     });
   } catch (err) {
     console.error('Error en GET /api/productos:', err.message);
@@ -803,6 +920,8 @@ app.get('/api/promociones', async (req, res) => {
         pr.emoji,
         COALESCE(pr.aplica_envase, 'no') AS aplica_envase,
         COALESCE(pr.cantidad_envases, 1) AS cantidad_envases,
+        COALESCE(pr.topar_precio_individual, FALSE) AS topar_precio_individual,
+        COALESCE(pr.mostrar_nombre_ticket, TRUE) AS mostrar_nombre_ticket,
         COALESCE(
           (
             SELECT json_agg(
@@ -828,7 +947,7 @@ app.get('/api/promociones', async (req, res) => {
                 'id', pa.id,
                 'nombre_paso', pa.nombre_paso,
                 'obligatorio', pa.obligatorio,
-                'autocalcular', COALESCE(pa.autocalcular, true),
+                'autocalcular', CASE WHEN pa.autocalcular = 0 OR pa.autocalcular IS FALSE THEN false ELSE true END,
                 'opciones', COALESCE(
                   (
                     SELECT json_agg(
@@ -858,7 +977,26 @@ app.get('/api/promociones', async (req, res) => {
       ORDER BY pr.id ASC;
     `;
     const result = await pool.query(query);
-    res.json({ success: true, promociones: result.rows });
+    res.json({ 
+      success: true, 
+      promociones: result.rows.map(row => {
+        if (typeof row.productos_fijos === 'string') {
+          try { row.productos_fijos = JSON.parse(row.productos_fijos); } catch (e) { row.productos_fijos = []; }
+        }
+        if (typeof row.pasos === 'string') {
+          try { row.pasos = JSON.parse(row.pasos); } catch (e) { row.pasos = []; }
+        }
+        if (row.pasos && Array.isArray(row.pasos)) {
+          row.pasos = row.pasos.map(paso => {
+            if (typeof paso.opciones === 'string') {
+              try { paso.opciones = JSON.parse(paso.opciones); } catch (e) { paso.opciones = []; }
+            }
+            return paso;
+          });
+        }
+        return row;
+      })
+    });
   } catch (err) {
     console.error('Error en GET /api/promociones:', err.message);
     res.status(500).json({ success: false, message: 'Error al obtener promociones.' });
@@ -867,7 +1005,7 @@ app.get('/api/promociones', async (req, res) => {
 
 // Endpoint de Crear Promoción
 app.post('/api/promociones', async (req, res) => {
-  const { nombre, precio, pasos, productos_fijos, emoji, aplica_envase, cantidad_envases } = req.body;
+  const { nombre, precio, pasos, productos_fijos, emoji, aplica_envase, cantidad_envases, topar_precio_individual, mostrar_nombre_ticket } = req.body;
   if (!nombre || precio === undefined) {
     return res.status(400).json({ success: false, message: 'Nombre y precio son obligatorios.' });
   }
@@ -877,8 +1015,8 @@ app.post('/api/promociones', async (req, res) => {
     await client.query('BEGIN');
     
     const promoRes = await client.query(
-      'INSERT INTO promociones (nombre, precio, emoji, aplica_envase, cantidad_envases) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [nombre.trim(), precio, emoji || '🎁', aplica_envase || 'no', parseInt(cantidad_envases) || 1]
+      'INSERT INTO promociones (nombre, precio, emoji, aplica_envase, cantidad_envases, topar_precio_individual, mostrar_nombre_ticket) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+      [nombre.trim(), precio, emoji || '🎁', aplica_envase || 'no', parseInt(cantidad_envases) || 1, isOptionEnabled(topar_precio_individual, false), isOptionEnabled(mostrar_nombre_ticket, true)]
     );
     const promoId = promoRes.rows[0].id;
     
@@ -928,7 +1066,7 @@ app.post('/api/promociones', async (req, res) => {
 // Endpoint de Editar Promoción
 app.put('/api/promociones/:id', async (req, res) => {
   const { id } = req.params;
-  const { nombre, precio, activo, pasos, productos_fijos, emoji, aplica_envase, cantidad_envases } = req.body;
+  const { nombre, precio, activo, pasos, productos_fijos, emoji, aplica_envase, cantidad_envases, topar_precio_individual, mostrar_nombre_ticket } = req.body;
   
   if (!nombre || precio === undefined) {
     return res.status(400).json({ success: false, message: 'Nombre y precio son obligatorios.' });
@@ -939,24 +1077,36 @@ app.put('/api/promociones/:id', async (req, res) => {
     await client.query('BEGIN');
     
     await client.query(
-      'UPDATE promociones SET nombre = $1, precio = $2, activo = $3, emoji = $4, aplica_envase = $5, cantidad_envases = $6 WHERE id = $7',
-      [nombre.trim(), precio, activo !== false, emoji || '🎁', aplica_envase || 'no', parseInt(cantidad_envases) || 1, id]
+      'UPDATE promociones SET nombre = $1, precio = $2, activo = $3, emoji = $4, aplica_envase = $5, cantidad_envases = $6, topar_precio_individual = $7, mostrar_nombre_ticket = $8 WHERE id = $9',
+      [nombre.trim(), precio, isOptionEnabled(activo, true), emoji || '🎁', aplica_envase || 'no', parseInt(cantidad_envases) || 1, isOptionEnabled(topar_precio_individual, false), isOptionEnabled(mostrar_nombre_ticket, true), id]
     );
     
-    // Borrar productos fijos antiguos e reinsertar
+    // Borrar productos fijos antiguos y reinsertar
     await client.query('DELETE FROM promocion_productos_fijos WHERE promocion_id = $1', [id]);
     if (productos_fijos && Array.isArray(productos_fijos)) {
+      const fijosMap = new Map();
       for (const pf of productos_fijos) {
-        if (pf.producto_id) {
-          await client.query(
-            'INSERT INTO promocion_productos_fijos (promocion_id, producto_id, cantidad) VALUES ($1, $2, $3)',
-            [id, pf.producto_id, parseInt(pf.cantidad) || 1]
-          );
+        if (pf && pf.producto_id) {
+          const pid = parseInt(pf.producto_id, 10);
+          const cant = parseInt(pf.cantidad, 10) || 1;
+          fijosMap.set(pid, (fijosMap.get(pid) || 0) + cant);
         }
+      }
+      for (const [pid, cant] of fijosMap.entries()) {
+        await client.query(
+          'INSERT INTO promocion_productos_fijos (promocion_id, producto_id, cantidad) VALUES ($1, $2, $3)',
+          [id, pid, cant]
+        );
       }
     }
 
-    // Borrar pasos antiguos (las opciones se borran en cascada automáticamente)
+    // Borrar opciones antiguas explícitamente para evitar duplicados por falta de ON DELETE CASCADE
+    await client.query(
+      'DELETE FROM promocion_opciones WHERE promocion_paso_id IN (SELECT id FROM promocion_pasos WHERE promocion_id = $1)',
+      [id]
+    );
+
+    // Borrar pasos antiguos
     await client.query('DELETE FROM promocion_pasos WHERE promocion_id = $1', [id]);
     
     if (pasos && Array.isArray(pasos)) {
@@ -968,10 +1118,18 @@ app.put('/api/promociones/:id', async (req, res) => {
         const pasoId = pasoRes.rows[0].id;
         
         if (paso.opciones && Array.isArray(paso.opciones)) {
+          const opcMap = new Map();
           for (const opcion of paso.opciones) {
+            if (opcion && opcion.producto_id) {
+              const pid = parseInt(opcion.producto_id, 10);
+              const extra = parseFloat(opcion.precio_adicional) || 0.00;
+              opcMap.set(pid, extra);
+            }
+          }
+          for (const [pid, extra] of opcMap.entries()) {
             await client.query(
               'INSERT INTO promocion_opciones (promocion_paso_id, producto_id, precio_adicional) VALUES ($1, $2, $3)',
-              [pasoId, opcion.producto_id, opcion.precio_adicional || 0.00]
+              [pasoId, pid, extra]
             );
           }
         }
@@ -1069,11 +1227,29 @@ app.post('/api/productos', async (req, res) => {
 
     // Comprobar si el producto ya está registrado
     const prodExist = await client.query(
-      'SELECT id FROM productos WHERE nombre = $1',
+      'SELECT id, nombre, precio, categoria FROM productos WHERE nombre = $1',
       [nombre.trim()]
     );
 
     if (prodExist.rows.length > 0) {
+      const existingProd = prodExist.rows[0];
+      const isEnvase = existingProd.id === 108 || existingProd.nombre.toLowerCase().includes('envase');
+      if (isEnvase) {
+        // Reasignar categoría y precio del envase existente sin error
+        const cat = categoria ? categoria.trim() : 'Otros';
+        const newPrice = parseFloat(precio) || existingProd.precio || 300;
+        await client.query(
+          'UPDATE productos SET categoria = $1, precio = $2, activo = true WHERE id = $3',
+          [cat, newPrice, existingProd.id]
+        );
+        await client.query('COMMIT');
+        return res.status(200).json({
+          success: true,
+          message: `El producto "${existingProd.nombre}" ha sido asignado a la categoría "${cat}" con éxito.`,
+          product: { ...existingProd, categoria: cat, precio: newPrice }
+        });
+      }
+
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
@@ -1185,6 +1361,54 @@ app.put('/api/productos/:id', async (req, res) => {
     });
   } finally {
     client.release();
+  }
+});
+
+// Endpoint para asignar/desasignar el producto 'Envase para llevar' a una categoría con 1 clic
+app.post('/api/productos/asignar-envase', async (req, res) => {
+  const { categoria, asignar } = req.body;
+  if (!categoria || !categoria.trim()) {
+    return res.status(400).json({ success: false, message: 'El nombre de la categoría es requerido.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const catDestino = (asignar !== false && asignar !== 'false' && asignar !== 0) ? categoria.trim() : 'Otros';
+
+    // Verificar si el producto 'Envase para llevar' existe
+    const existRes = await client.query(
+      "SELECT id, nombre, precio FROM productos WHERE id = 108 OR LOWER(nombre) LIKE '%envase para llevar%'"
+    );
+
+    let prodId;
+    if (existRes.rows.length === 0) {
+      const cfgRes = await client.query("SELECT valor FROM configuracion WHERE clave = 'precio_envase'");
+      const precioEnv = cfgRes.rows.length > 0 ? parseFloat(cfgRes.rows[0].valor) || 300 : 300;
+      const insRes = await client.query(
+        "INSERT INTO productos (nombre, precio, imagen, categoria, activo, aplica_envase) VALUES ('Envase para llevar', $1, '📦', $2, true, 'no') RETURNING id",
+        [precioEnv, catDestino]
+      );
+      prodId = insRes.rows[0].id;
+    } else {
+      prodId = existRes.rows[0].id;
+      await client.query(
+        "UPDATE productos SET categoria = $1, activo = true WHERE id = $2",
+        [catDestino, prodId]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      success: true,
+      message: (catDestino !== 'Otros')
+        ? `El producto "Envase para llevar" ahora pertenece a la categoría "${catDestino}".`
+        : `El producto "Envase para llevar" fue desvinculado y enviado a la sección "Otros".`,
+      categoria: catDestino
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error en /api/productos/asignar-envase:', err.message);
+    res.status(500).json({ success: false, message: 'Error al actualizar categoría del envase.' });
   }
 });
 
@@ -1388,7 +1612,7 @@ app.post('/api/ingredientes/:id/consumo', async (req, res) => {
     await pool.query('BEGIN');
 
     const result = await pool.query(
-      'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2 RETURNING id, nombre, stock',
+      'UPDATE ingredientes SET stock = MAX(0, stock - $1) WHERE id = $2 RETURNING id, nombre, stock',
       [cantidadNum, id]
     );
     if (result.rows.length === 0) {
@@ -1451,7 +1675,7 @@ app.delete('/api/ingredientes/:id', async (req, res) => {
 // Endpoint de Obtener Categorías
 app.get('/api/categorias', async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, nombre, emoji, orden, cobra_envase FROM categorias ORDER BY orden ASC, nombre ASC');
+    const result = await pool.query('SELECT id, nombre, emoji, orden, CASE WHEN cobra_envase = 0 OR cobra_envase IS FALSE THEN false ELSE true END AS cobra_envase FROM categorias ORDER BY orden ASC, nombre ASC');
     res.json({
       success: true,
       categorias: result.rows
@@ -1467,7 +1691,7 @@ app.get('/api/categorias', async (req, res) => {
 
 // Endpoint de Registrar Categoría
 app.post('/api/categorias', async (req, res) => {
-  const { nombre, emoji, cobra_envase } = req.body;
+  const { nombre, emoji, cobra_envase, asignar_envase } = req.body;
   if (!nombre || !nombre.trim()) {
     return res.status(400).json({
       success: false,
@@ -1488,6 +1712,14 @@ app.post('/api/categorias', async (req, res) => {
       'INSERT INTO categorias (nombre, emoji, orden, cobra_envase) VALUES ($1, $2, $3, $4) RETURNING id, nombre, emoji, orden, cobra_envase',
       [nombre.trim(), emoji ? emoji.trim() : '🏷️', nextOrder, cobra_envase !== false]
     );
+
+    if (isOptionEnabled(asignar_envase, false)) {
+      await pool.query(
+        "UPDATE productos SET categoria = $1, activo = true WHERE id = 108 OR LOWER(nombre) LIKE '%envase para llevar%'",
+        [nombre.trim()]
+      );
+    }
+
     res.status(201).json({
       success: true,
       message: `Categoría "${nombre.trim()}" creada con éxito.`,
@@ -1505,7 +1737,7 @@ app.post('/api/categorias', async (req, res) => {
 // Endpoint de Editar Categoría
 app.put('/api/categorias/:id', async (req, res) => {
   const { id } = req.params;
-  const { nombre, emoji, cobra_envase } = req.body;
+  const { nombre, emoji, cobra_envase, asignar_envase } = req.body;
   if (!nombre || !nombre.trim()) {
     return res.status(400).json({
       success: false,
@@ -1547,6 +1779,19 @@ app.put('/api/categorias/:id', async (req, res) => {
     // Actualizar la categoría
     await client.query('UPDATE categorias SET nombre = $1, emoji = $2, cobra_envase = $3 WHERE id = $4', [catNombreNuevo, emoji ? emoji.trim() : '🏷️', cobra_envase !== false, id]);
 
+    const deberiaAsignarEnvase = isOptionEnabled(asignar_envase, false);
+    if (deberiaAsignarEnvase) {
+      await client.query(
+        "UPDATE productos SET categoria = $1, activo = true WHERE id = 108 OR LOWER(nombre) LIKE '%envase para llevar%'",
+        [catNombreNuevo]
+      );
+    } else if (asignar_envase === false || asignar_envase === 'false' || asignar_envase === 0 || asignar_envase === '0') {
+      await client.query(
+        "UPDATE productos SET categoria = 'Otros' WHERE (id = 108 OR LOWER(nombre) LIKE '%envase para llevar%') AND categoria = $1",
+        [catNombreAntiguo]
+      );
+    }
+
     await client.query('COMMIT');
     res.json({
       success: true,
@@ -1582,8 +1827,8 @@ app.delete('/api/categorias/:id', async (req, res) => {
     }
     const catNombre = catRes.rows[0].nombre;
 
-    // Actualizar productos asociados para que usen 'Otros'
-    await client.query("UPDATE productos SET categoria = 'Otros' WHERE categoria = $1", [catNombre]);
+    // Eliminar productos asociados
+    await client.query("DELETE FROM productos WHERE categoria = $1", [catNombre]);
 
     // Eliminar la categoría
     await client.query('DELETE FROM categorias WHERE id = $1', [id]);
@@ -1658,7 +1903,7 @@ app.post('/api/pedidos', async (req, res) => {
     turno_id
   } = req.body;
 
-  if (!total || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
+  if (total === undefined || total === null || isNaN(parseFloat(total)) || !atendido_por || !productos || !Array.isArray(productos) || productos.length === 0) {
     return res.status(400).json({
       success: false,
       message: 'Datos del pedido incompletos o inválidos.'
@@ -1669,9 +1914,15 @@ app.post('/api/pedidos', async (req, res) => {
   let finalEfec = 0;
   let finalDeb = 0;
   let finalCred = 0;
+  let finalTotal = numTotal;
   const transTipo = tipo_transaccion || 'Efectivo';
 
-  if (transTipo === 'Mixto') {
+  if (transTipo === 'Pedido Externo') {
+    finalTotal = 0;
+    finalEfec = 0;
+    finalDeb = 0;
+    finalCred = 0;
+  } else if (transTipo === 'Mixto') {
     finalEfec = parseFloat(monto_efectivo) || 0;
     finalDeb = parseFloat(monto_debito) || 0;
     finalCred = parseFloat(monto_credito) || 0;
@@ -1698,10 +1949,10 @@ app.post('/api/pedidos', async (req, res) => {
 
     // 1. Insertar la cabecera del pedido
     const orderRes = await client.query(
-      'INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle, cantidad_envases, monto_envases, turno_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, fecha_hora',
+      "INSERT INTO pedidos (cliente_nombre, total, atendido_por, nota, tipo_entrega, tipo_transaccion, monto_efectivo, monto_debito, monto_credito, pago_mixto_detalle, cantidad_envases, monto_envases, turno_id, fecha_hora) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, datetime('now', 'localtime')) RETURNING id, fecha_hora",
       [
-        cliente_nombre ? cliente_nombre.trim() : null, 
-        total, 
+        cliente_nombre ? cliente_nombre.trim() : (transTipo === 'Pedido Externo' ? 'PedidosYa' : null), 
+        finalTotal, 
         atendido_por.trim(), 
         nota ? nota.trim() : null, 
         tipo_entrega || 'Servir', 
@@ -1767,9 +2018,10 @@ app.post('/api/pedidos', async (req, res) => {
       }
 
       // Registrar el producto en el detalle del pedido
+      const mostrarNombreVal = isOptionEnabled(item.mostrar_nombre_ticket, true);
       await client.query(
-        'INSERT INTO pedido_productos (pedido_id, producto_id, nombre_producto, cantidad, precio_unitario, promocion_id, productos_incluidos) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [pedidoId, validProductId, item.nombre, item.cantidad, item.precio, promoIdVal, prodsIncluidos ? JSON.stringify(prodsIncluidos) : null]
+        'INSERT INTO pedido_productos (pedido_id, producto_id, nombre_producto, cantidad, precio_unitario, promocion_id, productos_incluidos, mostrar_nombre_ticket) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [pedidoId, validProductId, item.nombre, item.cantidad, item.precio, promoIdVal, prodsIncluidos ? JSON.stringify(prodsIncluidos) : null, mostrarNombreVal]
       );
 
       if (isPromo) {
@@ -1795,7 +2047,7 @@ app.post('/api/pedidos', async (req, res) => {
               for (const recipeItem of recipeRes.rows) {
                 const discountAmount = parseFloat(recipeItem.cantidad) * (parseInt(prodFijo.cantidad) || 1) * item.cantidad;
                 await client.query(
-                  'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+                  'UPDATE ingredientes SET stock = MAX(0, stock - $1) WHERE id = $2',
                   [discountAmount, recipeItem.ingrediente_id]
                 );
               }
@@ -1814,7 +2066,7 @@ app.post('/api/pedidos', async (req, res) => {
               for (const recipeItem of recipeRes.rows) {
                 const discountAmount = parseFloat(recipeItem.cantidad) * item.cantidad;
                 await client.query(
-                  'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+                  'UPDATE ingredientes SET stock = MAX(0, stock - $1) WHERE id = $2',
                   [discountAmount, recipeItem.ingrediente_id]
                 );
               }
@@ -1830,7 +2082,7 @@ app.post('/api/pedidos', async (req, res) => {
         for (const recipeItem of recipeRes.rows) {
           const discountAmount = parseFloat(recipeItem.cantidad) * item.cantidad;
           await client.query(
-            'UPDATE ingredientes SET stock = GREATEST(0, stock - $1) WHERE id = $2',
+            'UPDATE ingredientes SET stock = MAX(0, stock - $1) WHERE id = $2',
             [discountAmount, recipeItem.ingrediente_id]
           );
         }
@@ -1884,7 +2136,12 @@ app.get('/api/pedidos', async (req, res) => {
     `);
     res.json({
       success: true,
-      pedidos: result.rows
+      pedidos: result.rows.map(row => {
+        if (typeof row.productos === 'string') {
+          try { row.productos = JSON.parse(row.productos); } catch (e) { row.productos = []; }
+        }
+        return row;
+      })
     });
   } catch (err) {
     console.error('Error en GET /api/pedidos:', err.message);
@@ -1924,7 +2181,12 @@ app.get('/api/pedidos/eliminados', async (req, res) => {
     `);
     res.json({
       success: true,
-      pedidos: result.rows
+      pedidos: result.rows.map(row => {
+        if (typeof row.productos === 'string') {
+          try { row.productos = JSON.parse(row.productos); } catch (e) { row.productos = []; }
+        }
+        return row;
+      })
     });
   } catch (err) {
     console.error('Error en GET /api/pedidos/eliminados:', err.message);
@@ -1935,7 +2197,7 @@ app.get('/api/pedidos/eliminados', async (req, res) => {
   }
 });
 
-// Endpoint para eliminar comanda (Soft-delete con verificación de contraseña de Administrador)
+// Endpoint para eliminar comanda (Soft-delete con verificación de contraseña del usuario)
 app.delete('/api/pedidos/:id', async (req, res) => {
   const { id } = req.params;
   const { contrasena, admin_nombre } = req.body || {};
@@ -1943,36 +2205,38 @@ app.delete('/api/pedidos/:id', async (req, res) => {
   if (!contrasena) {
     return res.status(400).json({
       success: false,
-      message: 'Se requiere ingresar la contraseña de Administrador.'
+      message: 'Se requiere ingresar la contraseña de autorización.'
     });
   }
 
   const client = await pool.connect();
   try {
-    // 1. Validar la contraseña de Administrador
-    let adminRes;
+    // 1. Validar la contraseña de usuario (Administrador, Cajero, Vendedor, etc.)
+    let userRes;
     if (admin_nombre) {
-      adminRes = await client.query(
-        "SELECT id, nombre, contrasena, cargo FROM usuarios WHERE LOWER(nombre) = LOWER($1) AND LOWER(cargo) = 'administrador'",
+      userRes = await client.query(
+        "SELECT id, nombre, contrasena, cargo FROM usuarios WHERE LOWER(nombre) = LOWER($1)",
         [admin_nombre.trim()]
       );
     }
     
-    if (!adminRes || adminRes.rows.length === 0) {
-      adminRes = await client.query(
-        "SELECT id, nombre, contrasena, cargo FROM usuarios WHERE LOWER(cargo) = 'administrador' AND contrasena = $1 LIMIT 1",
+    if (userRes && userRes.rows.length > 0 && userRes.rows[0].contrasena === contrasena.trim()) {
+      // Coincide la clave del usuario activo
+    } else {
+      userRes = await client.query(
+        "SELECT id, nombre, contrasena, cargo FROM usuarios WHERE contrasena = $1 LIMIT 1",
         [contrasena.trim()]
       );
     }
 
-    if (adminRes.rows.length === 0 || adminRes.rows[0].contrasena !== contrasena.trim()) {
+    if (!userRes || userRes.rows.length === 0 || userRes.rows[0].contrasena !== contrasena.trim()) {
       return res.status(401).json({
         success: false,
-        message: 'Contraseña de administrador incorrecta.'
+        message: 'Contraseña de autorización incorrecta.'
       });
     }
 
-    const adminUser = adminRes.rows[0];
+    const authUser = userRes.rows[0];
 
     // 2. Verificar existencia del pedido
     const orderRes = await client.query(
@@ -2041,7 +2305,7 @@ app.delete('/api/pedidos/:id', async (req, res) => {
     // 4. Marcar la comanda como eliminada (Soft-delete)
     await client.query(
       'UPDATE pedidos SET eliminado = TRUE, eliminado_por = $1, eliminado_fecha = CURRENT_TIMESTAMP WHERE id = $2',
-      [adminUser.nombre, id]
+      [authUser.nombre, id]
     );
 
     await client.query('COMMIT');
@@ -2061,15 +2325,46 @@ app.delete('/api/pedidos/:id', async (req, res) => {
 
 // Endpoint de Cierre de Caja del Día
 app.get('/api/informes/cierre', async (req, res) => {
-  const { fecha, turno_id } = req.query; // YYYY-MM-DD, and optional turno_id
-  if (!fecha) {
-    return res.status(400).json({ success: false, message: 'La fecha es requerida.' });
+  const { fecha, fecha_inicio, fecha_fin, turno_id } = req.query; // YYYY-MM-DD or range
+  const fIni = fecha_inicio || fecha;
+  const fFin = fecha_fin || fIni;
+  if (!fIni) {
+    return res.status(400).json({ success: false, message: 'La fecha o fecha_inicio es requerida.' });
   }
 
-  const useShift = (turno_id && turno_id !== 'all' && turno_id !== 'todos' && turno_id !== 'undefined');
-  const filterVal = useShift ? parseInt(turno_id, 10) : fecha;
-  const whereClause = useShift ? 'turno_id = $1' : '(turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1) OR (turno_id IS NULL AND DATE(fecha_hora) = $1))';
-  const whereClauseP = useShift ? 'p.turno_id = $1' : '(p.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1) OR (p.turno_id IS NULL AND DATE(p.fecha_hora) = $1))';
+  const isRange = Boolean(fFin && fFin !== fIni);
+  const useShift = (!isRange && turno_id && turno_id !== 'all' && turno_id !== 'todos' && turno_id !== 'undefined');
+
+  let filterParams;
+  let whereClause;
+  let whereClauseP;
+  let entradasWhere;
+  let consumosWhere;
+  let gastosWhere;
+
+  if (useShift) {
+    const shiftId = parseInt(turno_id, 10);
+    filterParams = [shiftId];
+    whereClause = 'turno_id = $1';
+    whereClauseP = 'p.turno_id = $1';
+    entradasWhere = 'e.turno_id = $1';
+    consumosWhere = 'c.turno_id = $1';
+    gastosWhere = 'g.turno_id = $1';
+  } else if (isRange) {
+    filterParams = [fIni, fFin];
+    whereClause = '((DATE(fecha_hora) >= $1 AND DATE(fecha_hora) <= $2) OR (turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) >= $1 AND DATE(fecha_hora_inicio) <= $2)))';
+    whereClauseP = '((DATE(p.fecha_hora) >= $1 AND DATE(p.fecha_hora) <= $2) OR (p.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) >= $1 AND DATE(fecha_hora_inicio) <= $2)))';
+    entradasWhere = '((DATE(e.fecha_hora) >= $1 AND DATE(e.fecha_hora) <= $2) OR (e.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) >= $1 AND DATE(fecha_hora_inicio) <= $2)))';
+    consumosWhere = '((DATE(c.fecha_hora) >= $1 AND DATE(c.fecha_hora) <= $2) OR (c.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) >= $1 AND DATE(fecha_hora_inicio) <= $2)))';
+    gastosWhere = '(((g.fecha >= $1 AND g.fecha <= $2) OR (DATE(g.fecha_hora) >= $1 AND DATE(g.fecha_hora) <= $2)) OR (g.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) >= $1 AND DATE(fecha_hora_inicio) <= $2)))';
+  } else {
+    filterParams = [fIni];
+    whereClause = '((DATE(fecha_hora) = $1) OR (turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1)))';
+    whereClauseP = '((DATE(p.fecha_hora) = $1) OR (p.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1)))';
+    entradasWhere = '((DATE(e.fecha_hora) = $1) OR (e.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1)))';
+    consumosWhere = '((DATE(c.fecha_hora) = $1) OR (c.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1)))';
+    gastosWhere = '((g.fecha = $1 OR DATE(g.fecha_hora) = $1) OR (g.turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1)))';
+  }
 
   try {
     const result = await pool.query(`
@@ -2082,7 +2377,7 @@ app.get('/api/informes/cierre', async (req, res) => {
         COALESCE(SUM(CASE WHEN tipo_transaccion = 'Crédito' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_credito, 0) ELSE 0 END), 0)::FLOAT as total_credito
       FROM pedidos
       WHERE ${whereClause} AND (eliminado IS FALSE OR eliminado IS NULL)
-    `, [filterVal]);
+    `, filterParams);
 
     const row = result.rows[0];
     const total_ventas = row.total_ventas;
@@ -2104,7 +2399,7 @@ app.get('/api/informes/cierre', async (req, res) => {
       WHERE ${whereClauseP} AND (p.eliminado IS FALSE OR p.eliminado IS NULL)
       GROUP BY pp.nombre_producto
       ORDER BY cantidad_vendida DESC
-    `, [filterVal]);
+    `, filterParams);
 
     // Consultar total de envases vendidos en el día (excluyendo comandas eliminadas)
     const envasesResult = await pool.query(`
@@ -2113,7 +2408,7 @@ app.get('/api/informes/cierre', async (req, res) => {
         COALESCE(SUM(monto_envases), 0)::INTEGER as total_pesos
       FROM pedidos
       WHERE ${whereClause} AND (eliminado IS FALSE OR eliminado IS NULL)
-    `, [filterVal]);
+    `, filterParams);
 
     const envases_vendidos = envasesResult.rows[0] || { cantidad: 0, total_pesos: 0 };
 
@@ -2133,7 +2428,7 @@ app.get('/api/informes/cierre', async (req, res) => {
           OR pp.productos_incluidos IS NOT NULL 
           OR pp.nombre_producto IN (SELECT nombre FROM promociones)
         )
-    `, [filterVal]);
+    `, filterParams);
 
     const mapaProdsPromo = {};
 
@@ -2201,6 +2496,23 @@ app.get('/api/informes/cierre', async (req, res) => {
     const promosListRes = await pool.query('SELECT nombre FROM promociones');
     const promosNombresSet = new Set(promosListRes.rows.map(r => r.nombre));
 
+    // Obtener mapa de categorías de los productos y orden configurado
+    const prodCatRes = await pool.query('SELECT nombre, categoria FROM productos');
+    const prodCatMap = {};
+    for (const r of prodCatRes.rows) {
+      prodCatMap[r.nombre] = r.categoria || 'Otros';
+    }
+
+    const catOrderRes = await pool.query('SELECT nombre, orden, emoji FROM categorias ORDER BY orden ASC');
+    const catOrderMap = {};
+    const catEmojiMap = {};
+    catOrderRes.rows.forEach((c, idx) => {
+      catOrderMap[c.nombre] = (c.orden !== null && c.orden !== undefined) ? c.orden : idx;
+      catEmojiMap[c.nombre] = c.emoji || '🏷️';
+    });
+
+    const getCat = (nom) => prodCatMap[nom] || (nom === 'Envases para llevar' ? 'Envases' : 'Otros');
+
     const mapaUnificados = {};
 
     // 1. Sumar productos individuales vendidos directamente
@@ -2209,7 +2521,16 @@ app.get('/api/informes/cierre', async (req, res) => {
       const cant = parseInt(p.cantidad_vendida) || 0;
       if (!promosNombresSet.has(nom)) {
         if (!mapaUnificados[nom]) {
-          mapaUnificados[nom] = { nombre_producto: nom, cantidad_directa: 0, cantidad_promo: 0, cantidad_total: 0 };
+          const cat = getCat(nom);
+          mapaUnificados[nom] = { 
+            nombre_producto: nom, 
+            categoria: cat,
+            categoria_emoji: catEmojiMap[cat] || '🏷️',
+            categoria_orden: catOrderMap[cat] !== undefined ? catOrderMap[cat] : 999,
+            cantidad_directa: 0, 
+            cantidad_promo: 0, 
+            cantidad_total: 0 
+          };
         }
         mapaUnificados[nom].cantidad_directa += cant;
         mapaUnificados[nom].cantidad_total += cant;
@@ -2221,7 +2542,16 @@ app.get('/api/informes/cierre', async (req, res) => {
       const nom = p.nombre_producto;
       const cant = parseInt(p.cantidad_total) || 0;
       if (!mapaUnificados[nom]) {
-        mapaUnificados[nom] = { nombre_producto: nom, cantidad_directa: 0, cantidad_promo: 0, cantidad_total: 0 };
+        const cat = getCat(nom);
+        mapaUnificados[nom] = { 
+          nombre_producto: nom, 
+          categoria: cat,
+          categoria_emoji: catEmojiMap[cat] || '🏷️',
+          categoria_orden: catOrderMap[cat] !== undefined ? catOrderMap[cat] : 999,
+          cantidad_directa: 0, 
+          cantidad_promo: 0, 
+          cantidad_total: 0 
+        };
       }
       mapaUnificados[nom].cantidad_promo += cant;
       mapaUnificados[nom].cantidad_total += cant;
@@ -2229,8 +2559,13 @@ app.get('/api/informes/cierre', async (req, res) => {
 
     // 3. Incluir envases para llevar si existen
     if (envases_vendidos && envases_vendidos.cantidad > 0) {
-      mapaUnificados['Envases para llevar'] = {
-        nombre_producto: 'Envases para llevar',
+      const nom = 'Envases para llevar';
+      const cat = getCat(nom);
+      mapaUnificados[nom] = {
+        nombre_producto: nom,
+        categoria: cat,
+        categoria_emoji: '📦',
+        categoria_orden: 998,
         cantidad_directa: envases_vendidos.cantidad,
         cantidad_promo: 0,
         cantidad_total: envases_vendidos.cantidad
@@ -2238,7 +2573,12 @@ app.get('/api/informes/cierre', async (req, res) => {
     }
 
     const productos_unificados = Object.values(mapaUnificados)
-      .sort((a, b) => b.cantidad_total - a.cantidad_total);
+      .sort((a, b) => {
+        if (a.categoria_orden !== b.categoria_orden) {
+          return a.categoria_orden - b.categoria_orden;
+        }
+        return b.cantidad_total - a.cantidad_total;
+      });
 
     // Consultar el gasto real de ingredientes (materia prima) basado en la totalidad de productos vendidos
     const mapaIngredientesGastados = {};
@@ -2251,6 +2591,7 @@ app.get('/api/informes/cierre', async (req, res) => {
         SELECT 
           i.id as ingrediente_id,
           i.nombre as ingrediente_nombre,
+          i.unidad,
           pi.cantidad as cantidad_por_unidad
         FROM productos pr
         JOIN producto_ingredientes pi ON pr.id = pi.producto_id
@@ -2261,11 +2602,13 @@ app.get('/api/informes/cierre', async (req, res) => {
       for (const ing of recipeRes.rows) {
         const ingId = ing.ingrediente_id;
         const ingNombre = ing.ingrediente_nombre;
+        const ingUnidad = ing.unidad || '';
         const gastado = parseFloat(ing.cantidad_por_unidad) * cantTotal;
 
         if (!mapaIngredientesGastados[ingId]) {
           mapaIngredientesGastados[ingId] = {
             ingrediente_nombre: ingNombre,
+            unidad: ingUnidad,
             cantidad_gastada: 0
           };
         }
@@ -2276,18 +2619,18 @@ app.get('/api/informes/cierre', async (req, res) => {
     const ingredientes_gastados = Object.values(mapaIngredientesGastados)
       .sort((a, b) => b.cantidad_gastada - a.cantidad_gastada);
 
-    // Consultar comandas eliminadas en la fecha seleccionada
+    // Consultar comandas eliminadas en el período seleccionado
     const eliminadasResult = await pool.query(`
       SELECT 
         id, 
         cliente_nombre, 
         total::FLOAT, 
         COALESCE(eliminado_por, 'Administrador') as eliminado_por, 
-        TO_CHAR(eliminado_fecha, 'HH24:MI') as hora_eliminado
+        strftime('%H:%M', eliminado_fecha) as hora_eliminado
       FROM pedidos
       WHERE ${whereClause} AND eliminado = TRUE
       ORDER BY eliminado_fecha DESC
-    `, [filterVal]);
+    `, filterParams);
 
     const comandas_eliminadas = eliminadasResult.rows;
     const cantidad_eliminadas = comandas_eliminadas.length;
@@ -2296,21 +2639,73 @@ app.get('/api/informes/cierre', async (req, res) => {
     // Consultar el efectivo inicial sugerido del o los turnos
     let efectivoInicialSugerido = 50000;
     if (useShift) {
-      const shiftRes = await pool.query('SELECT COALESCE(efectivo_inicial, 0)::FLOAT as efectivo_inicial FROM turnos WHERE id = $1', [filterVal]);
+      const shiftRes = await pool.query('SELECT COALESCE(efectivo_inicial, 0)::FLOAT as efectivo_inicial FROM turnos WHERE id = $1', [parseInt(turno_id, 10)]);
       if (shiftRes.rows.length > 0) {
         efectivoInicialSugerido = shiftRes.rows[0].efectivo_inicial;
       }
+    } else if (isRange) {
+      const shiftRes = await pool.query("SELECT COALESCE(SUM(efectivo_inicial), 0)::FLOAT as efectivo_inicial FROM turnos WHERE DATE(fecha_hora_inicio) >= $1 AND DATE(fecha_hora_inicio) <= $2", [fIni, fFin]);
+      if (shiftRes.rows.length > 0 && shiftRes.rows[0].efectivo_inicial > 0) {
+        efectivoInicialSugerido = shiftRes.rows[0].efectivo_inicial;
+      }
     } else {
-      const shiftRes = await pool.query('SELECT COALESCE(SUM(efectivo_inicial), 0)::FLOAT as efectivo_inicial FROM turnos WHERE DATE(fecha_hora_inicio) = $1', [filterVal]);
+      const shiftRes = await pool.query("SELECT COALESCE(SUM(efectivo_inicial), 0)::FLOAT as efectivo_inicial FROM turnos WHERE DATE(fecha_hora_inicio) = $1", [fIni]);
       if (shiftRes.rows.length > 0 && shiftRes.rows[0].efectivo_inicial > 0) {
         efectivoInicialSugerido = shiftRes.rows[0].efectivo_inicial;
       }
     }
 
+    // Consultar entradas de inventario (materia prima ingresada)
+    const entradasRes = await pool.query(`
+      SELECT 
+        i.nombre as ingrediente_nombre,
+        i.unidad,
+        SUM(e.cantidad)::FLOAT as cantidad_total
+      FROM entradas_inventario e
+      JOIN ingredientes i ON e.ingrediente_id = i.id
+      WHERE ${entradasWhere}
+      GROUP BY i.nombre, i.unidad
+      ORDER BY i.nombre ASC
+    `, filterParams);
+
+    // Consultar consumos de inventario (mermas registradas)
+    const consumosRes = await pool.query(`
+      SELECT 
+        i.nombre as ingrediente_nombre,
+        i.unidad,
+        SUM(c.cantidad)::FLOAT as cantidad_total
+      FROM consumos_inventario c
+      JOIN ingredientes i ON c.ingrediente_id = i.id
+      WHERE ${consumosWhere}
+      GROUP BY i.nombre, i.unidad
+      ORDER BY i.nombre ASC
+    `, filterParams);
+
+    // Consultar gastos en efectivo del turno o período seleccionado
+    const gastosRes = await pool.query(`
+      SELECT 
+        id, 
+        descripcion, 
+        monto::FLOAT as monto, 
+        fecha_hora, 
+        COALESCE(registrado_por, 'Cajero') as registrado_por, 
+        turno_id, 
+        fecha
+      FROM gastos_caja g
+      WHERE ${gastosWhere}
+      ORDER BY id DESC
+    `, filterParams);
+
+    const gastosList = gastosRes.rows;
+    const total_gastos = gastosList.reduce((acc, curr) => acc + (parseFloat(curr.monto) || 0), 0);
+
     res.json({
       success: true,
       data: {
-        fecha,
+        fecha: isRange ? `${fIni} al ${fFin}` : fIni,
+        fecha_inicio: fIni,
+        fecha_fin: fFin,
+        is_range: isRange,
         total_ventas,
         ticket_inicio,
         ticket_fin,
@@ -2318,6 +2713,8 @@ app.get('/api/informes/cierre', async (req, res) => {
         total_debito,
         total_credito,
         total_tarjeta,
+        total_gastos,
+        gastos: gastosList,
         productos_vendidos: productosResult.rows,
         envases_vendidos,
         productos_promociones,
@@ -2326,12 +2723,86 @@ app.get('/api/informes/cierre', async (req, res) => {
         comandas_eliminadas,
         cantidad_eliminadas,
         monto_total_eliminado,
-        efectivo_inicial_sugerido: efectivoInicialSugerido
+        efectivo_inicial_sugerido: efectivoInicialSugerido,
+        entradas_inventario: entradasRes.rows,
+        mermas_inventario: consumosRes.rows
       }
     });
   } catch (err) {
     console.error('Error en GET /api/informes/cierre:', err.message);
     res.status(500).json({ success: false, message: 'Error al obtener el informe de cierre.' });
+  }
+});
+
+// Endpoint para registrar un gasto en efectivo
+app.post('/api/gastos', async (req, res) => {
+  const { descripcion, monto, registrado_por, turno_id, fecha } = req.body;
+  if (!descripcion || !monto || parseFloat(monto) <= 0) {
+    return res.status(400).json({ success: false, message: 'Descripción y un monto válido mayor a 0 son requeridos.' });
+  }
+
+  try {
+    const fechaStr = fecha || new Date().toISOString().split('T')[0];
+    const result = await pool.query(`
+      INSERT INTO gastos_caja (descripcion, monto, fecha_hora, registrado_por, turno_id, fecha)
+      VALUES ($1, $2, datetime('now', 'localtime'), $3, $4, $5)
+      RETURNING id, descripcion, monto::FLOAT as monto, fecha_hora, registrado_por, turno_id, fecha
+    `, [descripcion.trim(), parseFloat(monto), registrado_por || 'Cajero', turno_id || null, fechaStr]);
+
+    res.json({
+      success: true,
+      message: 'Gasto en efectivo registrado correctamente.',
+      gasto: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error en POST /api/gastos:', err);
+    res.status(500).json({ success: false, message: 'Error al registrar el gasto.' });
+  }
+});
+
+// Endpoint para obtener lista de gastos filtrados por fecha o turno
+app.get('/api/gastos', async (req, res) => {
+  const { fecha, turno_id } = req.query;
+  const useShift = (turno_id && turno_id !== 'all' && turno_id !== 'todos' && turno_id !== 'undefined');
+  const filterVal = useShift ? parseInt(turno_id, 10) : (fecha || new Date().toISOString().split('T')[0]);
+  const whereClause = useShift 
+    ? 'turno_id = $1' 
+    : "((fecha = $1 OR DATE(fecha_hora) = $1) OR (turno_id IN (SELECT id FROM turnos WHERE DATE(fecha_hora_inicio) = $1)))";
+
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id, 
+        descripcion, 
+        monto::FLOAT as monto, 
+        fecha_hora, 
+        COALESCE(registrado_por, 'Cajero') as registrado_por, 
+        turno_id, 
+        fecha
+      FROM gastos_caja
+      WHERE ${whereClause}
+      ORDER BY id DESC
+    `, [filterVal]);
+
+    res.json({
+      success: true,
+      gastos: result.rows
+    });
+  } catch (err) {
+    console.error('Error en GET /api/gastos:', err);
+    res.status(500).json({ success: false, message: 'Error al consultar los gastos.' });
+  }
+});
+
+// Endpoint para eliminar un gasto por ID
+app.delete('/api/gastos/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM gastos_caja WHERE id = $1', [id]);
+    res.json({ success: true, message: 'Gasto eliminado correctamente.' });
+  } catch (err) {
+    console.error('Error en DELETE /api/gastos/:id:', err);
+    res.status(500).json({ success: false, message: 'Error al eliminar el gasto.' });
   }
 });
 
@@ -2346,7 +2817,7 @@ app.get('/api/cierres/:fecha', async (req, res) => {
     const result = await pool.query(
       `SELECT 
         id, 
-        TO_CHAR(fecha, 'YYYY-MM-DD') as fecha, 
+        strftime('%Y-%m-%d', fecha) as fecha, 
         cierre_fecha_hora, 
         cargado_por, 
         total_ventas::FLOAT, 
@@ -2407,8 +2878,20 @@ app.post('/api/cierres', async (req, res) => {
   const tVentas = parseFloat(total_ventas);
   const tTarjeta = parseFloat(total_tarjeta);
 
-  // Diferencia = Efectivo Real - (Efectivo Ventas + Fondo Apertura)
-  const dif = eReal - (tEfectivo + fApertura);
+  // Diferencia = Efectivo Real - (Efectivo Ventas + Fondo Apertura - Total Gastos)
+  let tGastos = 0;
+  try {
+    const gastosRes = await pool.query(`
+      SELECT COALESCE(SUM(monto), 0)::FLOAT as total_gastos
+      FROM gastos_caja
+      WHERE fecha = $1 OR DATE(fecha_hora) = $1
+    `, [fecha]);
+    tGastos = gastosRes.rows[0]?.total_gastos || 0;
+  } catch (gErr) {
+    console.error('Error al consultar gastos para arqueo:', gErr);
+  }
+
+  const dif = eReal - (tEfectivo + fApertura - tGastos);
 
   try {
     const queryStr = `
@@ -2429,7 +2912,7 @@ app.post('/api/cierres', async (req, res) => {
         observaciones = EXCLUDED.observaciones
       RETURNING 
         id, 
-        TO_CHAR(fecha, 'YYYY-MM-DD') as fecha, 
+        strftime('%Y-%m-%d', fecha) as fecha, 
         cierre_fecha_hora, 
         cargado_por, 
         total_ventas::FLOAT, 
@@ -2474,14 +2957,14 @@ app.get('/api/informes/excel', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT 
-        TO_CHAR(fecha_hora, 'YYYY-MM-DD') as fecha,
-        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0)::FLOAT as total_efectivo,
-        COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0)::FLOAT as total_tarjeta,
-        COALESCE(SUM(total), 0)::FLOAT as total_ventas
+        strftime('%Y-%m-%d', fecha_hora) as fecha,
+        COALESCE(SUM(CASE WHEN tipo_transaccion = 'Efectivo' THEN total WHEN tipo_transaccion = 'Mixto' THEN COALESCE(monto_efectivo, 0) ELSE 0 END), 0) as total_efectivo,
+        COALESCE(SUM(CASE WHEN tipo_transaccion IN ('Débito', 'Crédito') THEN total WHEN tipo_transaccion = 'Mixto' THEN (COALESCE(monto_debito, 0) + COALESCE(monto_credito, 0)) ELSE 0 END), 0) as total_tarjeta,
+        COALESCE(SUM(total), 0) as total_ventas
       FROM pedidos
-      WHERE TO_CHAR(fecha_hora, 'YYYY-MM') = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
-      GROUP BY TO_CHAR(fecha_hora, 'YYYY-MM-DD')
-      ORDER BY TO_CHAR(fecha_hora, 'YYYY-MM-DD') ASC
+      WHERE strftime('%Y-%m', fecha_hora) = $1 AND (eliminado IS FALSE OR eliminado IS NULL)
+      GROUP BY strftime('%Y-%m-%d', fecha_hora)
+      ORDER BY strftime('%Y-%m-%d', fecha_hora) ASC
     `, [mes]);
 
     // Crear filas del reporte
@@ -2671,20 +3154,20 @@ app.get('/api/informes/rango-ventas-diarias', async (req, res) => {
   try {
     let query, params;
     let groupExpr = `DATE(fecha_hora)`;
-    let selectExpr = `TO_CHAR(DATE(fecha_hora), 'YYYY-MM-DD')`;
+    let selectExpr = `strftime('%Y-%m-%d', fecha_hora)`;
 
     if (agrupacion === 'mes') {
-      groupExpr = `DATE_TRUNC('month', fecha_hora)`;
-      selectExpr = `TO_CHAR(DATE_TRUNC('month', fecha_hora), 'YYYY-MM')`;
+      groupExpr = `strftime('%Y-%m', fecha_hora)`;
+      selectExpr = `strftime('%Y-%m', fecha_hora)`;
     } else if (agrupacion === 'semana') {
-      groupExpr = `DATE_TRUNC('week', fecha_hora)`;
-      selectExpr = `TO_CHAR(DATE_TRUNC('week', fecha_hora), 'YYYY-MM-DD')`;
+      groupExpr = `strftime('%Y-%W', fecha_hora)`;
+      selectExpr = `strftime('%Y-%W', fecha_hora)`;
     } else if (agrupacion === 'hora' || (fecha_inicio === fecha_fin && !agrupacion)) {
-      groupExpr = `TO_CHAR(fecha_hora, 'HH24:00')`;
-      selectExpr = `TO_CHAR(fecha_hora, 'HH24:00')`;
+      groupExpr = `strftime('%H:00', fecha_hora)`;
+      selectExpr = `strftime('%H:00', fecha_hora)`;
     }
 
-    if (fecha_inicio === fecha_fin && selectExpr === `TO_CHAR(fecha_hora, 'HH24:00')`) {
+    if (fecha_inicio === fecha_fin && (agrupacion === 'hora' || !agrupacion)) {
       // Si es un solo día y se agrupa por hora
       query = `
         SELECT 
@@ -2785,22 +3268,7 @@ app.get('/api/informes/rango-productos-json', async (req, res) => {
   }
 });
 
-// Endpoint de Obtener Configuración
-app.get('/api/configuracion', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT clave, valor FROM configuracion');
-    const configMap = {};
-    result.rows.forEach(row => {
-      configMap[row.clave] = row.valor;
-    });
-    res.json({ success: true, config: configMap });
-  } catch (err) {
-    console.error('Error en GET /api/configuracion:', err.message);
-    res.status(500).json({ success: false, message: 'Error al obtener la configuración.' });
-  }
-});
-
-// Endpoint de Guardar Configuración
+// Endpoint de Guardar Configuración (Batch)
 app.post('/api/configuracion', async (req, res) => {
   const { config } = req.body;
   if (!config || typeof config !== 'object') {
@@ -2815,6 +3283,18 @@ app.post('/api/configuracion', async (req, res) => {
         VALUES ($1, $2)
         ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
       `, [clave, String(valor)]);
+
+      if (clave === 'precio_envase') {
+        const pVal = parseFloat(valor) || 0;
+        await pool.query(
+          "UPDATE productos SET precio = $1 WHERE id = 108 OR LOWER(nombre) LIKE '%envase para llevar%'",
+          [pVal]
+        );
+        await pool.query(
+          "UPDATE envases SET precio = $1 WHERE id = 1 OR LOWER(nombre) LIKE '%envase%'",
+          [pVal]
+        );
+      }
     }
     await pool.query('COMMIT');
     res.json({ success: true, message: 'Configuración guardada correctamente.' });
@@ -2827,46 +3307,27 @@ app.post('/api/configuracion', async (req, res) => {
 
 // Endpoint de Enviar Reporte de Inventario por Correo
 app.post('/api/reportes/enviar', async (req, res) => {
-  const { fork } = require('child_process');
-  const path = require('path');
   try {
-    const scriptPath = path.join(__dirname, 'comando_gmail.js');
-    console.log(`[Backend] Ejecutando envío de correo de inventario usando fork: ${scriptPath}`);
+    try {
+      delete require.cache[require.resolve('./comando_gmail.js')];
+    } catch (e) {}
+    const { run } = require('./comando_gmail.js');
+    const turnoId = req.body && req.body.turno_id ? parseInt(req.body.turno_id, 10) : null;
+    console.log(`[Backend] Ejecutando envío de correo de reporte${turnoId ? ` para turno #${turnoId}` : ''}...`);
     
-    const child = fork(scriptPath, [], {
-      env: { ...process.env }
-    });
+    const success = await run(turnoId);
     
-    let hasResponded = false;
-
-    child.on('error', (err) => {
-      console.error('[Backend] Error al ejecutar comando_gmail.js:', err);
-      if (!hasResponded) {
-        hasResponded = true;
-        res.status(500).json({
-          success: false,
-          message: 'Error al ejecutar script de correo: ' + err.message
-        });
-      }
-    });
-    
-    child.on('exit', (code) => {
-      console.log(`[Backend] comando_gmail.js finalizado con código: ${code}`);
-      if (!hasResponded) {
-        hasResponded = true;
-        if (code === 0) {
-          res.json({
-            success: true,
-            message: 'Reporte de inventario enviado correctamente al correo.'
-          });
-        } else {
-          res.status(500).json({
-            success: false,
-            message: 'Error al enviar correo de reporte. Verifique el correo destinatario/remitente y la configuración de contraseña SMTP.'
-          });
-        }
-      }
-    });
+    if (success) {
+      res.json({
+        success: true,
+        message: 'Reporte de inventario enviado correctamente al correo.'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Error al enviar correo de reporte. Verifique el correo destinatario/remitente y la configuración de contraseña SMTP.'
+      });
+    }
   } catch (err) {
     console.error('Error en POST /api/reportes/enviar:', err.message);
     res.status(500).json({
@@ -2876,7 +3337,30 @@ app.post('/api/reportes/enviar', async (req, res) => {
   }
 });
 
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor backend escuchando en http://localhost:${PORT}`);
-});
+// Iniciar servidor: si se definió un Named Pipe / Socket en memoria, no abre ningún puerto TCP
+const pipePath = process.env.USE_SOCKET_PIPE;
+if (pipePath) {
+  if (process.platform !== 'win32') {
+    try { require('fs').unlinkSync(pipePath); } catch (e) {}
+  }
+  const server = app.listen(pipePath, () => {
+    console.log(`🚀 Servidor backend escuchando en memoria/pipe: ${pipePath}`);
+    console.log(`🔒 Puerto 5000 completamente libre (Modo 100% App Nativa)`);
+  });
+  server.on('error', (err) => {
+    console.error('[Backend] Error en el servidor Pipe:', err);
+  });
+} else {
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 Servidor backend escuchando en http://localhost:${PORT}`);
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Backend] Puerto ${PORT} ya está en uso. Se asume instancia existente.`);
+    } else {
+      console.error('[Backend] Error en el servidor Express:', err);
+    }
+  });
+}
+
+

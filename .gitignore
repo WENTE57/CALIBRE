@@ -10,14 +10,60 @@ node_modules/
 .env.production.local
 **/.env
 
-# Carpeta de compilación de producción de Vite
-/frontend/dist/
+# Carpeta de compilación frontend y web (Vite)
 dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
 
-# Archivos del sistema
-.DS_Store
-Thumbs.db
+# Ejecutable y empaquetado de Electron (Binarios pesados no requeridos en Git)
+dist-electron/
+**/dist-electron/
+frontend/dist-electron/
+release/
+release-builds/
+build/
+out/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.zip
+*.msi
+
+# Base de datos local y archivos de persistencia
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db
+backend/database.sqlite
+datos_postgres/
+
+# Logs del sistema y gestores de paquetes
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Archivos del sistema operativo y editores
+.DS_Store
+Thumbs.db
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Archivos y carpetas temporales de desarrollo
+**/scratch/
+backend/scratch/
+test*.sql
+.agents/
+

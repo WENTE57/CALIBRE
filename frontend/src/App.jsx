@@ -32,6 +32,32 @@ class ReportesErrorBoundary extends React.Component {
   }
 }
 
+const parseFechaHoraChile = (fechaInput) => {
+  if (!fechaInput) return { fechaStr: '—', horaStr: '—' };
+  const rawStr = String(fechaInput).trim();
+  const match = rawStr.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (match && !rawStr.includes('Z') && !rawStr.includes('+') && !rawStr.match(/-\d{2}:\d{2}$/)) {
+    const [_, yyyy, mm, dd, hh, min] = match;
+    return {
+      fechaStr: `${dd}/${mm}/${yyyy}`,
+      horaStr: `${hh}:${min}`
+    };
+  }
+  const dObj = new Date(rawStr);
+  if (isNaN(dObj.getTime())) {
+    return { fechaStr: rawStr, horaStr: '' };
+  }
+  const fStr = dObj.toLocaleDateString('es-CL', { timeZone: 'America/Santiago' });
+  const hStr = dObj.toLocaleTimeString('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false });
+  return { fechaStr: fStr, horaStr: hStr };
+};
+
+const formatFechaHoraChile = (fechaInput) => {
+  const { fechaStr, horaStr } = parseFechaHoraChile(fechaInput);
+  if (fechaStr === '—') return '—';
+  return horaStr ? `${fechaStr} - ${horaStr} hrs` : fechaStr;
+};
+
 // Componente de Selección de Productos con Buscador por Teclado Integrado
 const SearchableProductSelect = ({ options, value, onChange, placeholder = "-- Buscar o seleccionar producto --", style, id }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -259,6 +285,12 @@ const AutocompleteGhostInput = ({
 };
 
 
+const isOptionEnabled = (val, defaultVal = true) => {
+  if (val === undefined || val === null) return defaultVal;
+  if (val === false || val === 0 || val === '0' || val === 'false' || val === 'f' || val === 'FALSE') return false;
+  return true;
+};
+
 const getPromoSubItems = (item) => {
   if (!item) return [];
   const subItems = [];
@@ -479,7 +511,7 @@ function App() {
   const handleConfirmDeletePedido = async (e) => {
     if (e) e.preventDefault();
     if (!pedidoToDelete || !adminPasswordInput.trim()) {
-      setErrorDeleteModal('Por favor ingresa la contraseña de Administrador.');
+      setErrorDeleteModal('Por favor ingresa la contraseña de autorización.');
       return;
     }
 
@@ -587,11 +619,12 @@ function App() {
   const [configEmailTo, setConfigEmailTo] = useState('');
   const [configEmailFrom, setConfigEmailFrom] = useState('');
   const [configSmtpHost, setConfigSmtpHost] = useState('');
-  const [configSmtpPort, setConfigSmtpPort] = useState('1025');
+  const [configSmtpPort, setConfigSmtpPort] = useState('587');
   const [configSmtpSecure, setConfigSmtpSecure] = useState(false);
   const [configSmtpUser, setConfigSmtpUser] = useState('');
   const [configSmtpPass, setConfigSmtpPass] = useState('');
   const [configLoading, setConfigLoading] = useState(false);
+  const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [configSuccess, setConfigSuccess] = useState('');
   const [configError, setConfigError] = useState('');
 
@@ -619,6 +652,7 @@ function App() {
   const [efectivoInicialInput, setEfectivoInicialInput] = useState('');
   const [efectivoFinalInput, setEfectivoFinalInput] = useState('');
   const [showCerrarTurnoPrompt, setShowCerrarTurnoPrompt] = useState(false);
+  const [showPromptImprimirFinanciero, setShowPromptImprimirFinanciero] = useState(false);
   const [errorShiftInput, setErrorShiftInput] = useState('');
   const [errorCerrarShiftInput, setErrorCerrarShiftInput] = useState('');
   const [observacionesCerrarShiftInput, setObservacionesCerrarShiftInput] = useState('');
@@ -630,8 +664,11 @@ function App() {
   const [precioEnvaseOverride, setPrecioEnvaseOverride] = useState(null);
   const [prodAplicaEnvase, setProdAplicaEnvase] = useState('heredar');
   const [nuevaCatCobraEnvase, setNuevaCatCobraEnvase] = useState(true);
+  const [nuevaCatAsignarEnvase, setNuevaCatAsignarEnvase] = useState(false);
   const [promoAplicaEnvase, setPromoAplicaEnvase] = useState('no');
   const [promoCantidadEnvases, setPromoCantidadEnvases] = useState(1);
+  const [promoToparPrecioIndividual, setPromoToparPrecioIndividual] = useState(false);
+  const [promoMostrarNombreTicket, setPromoMostrarNombreTicket] = useState(true);
   const [promoPrecio, setPromoPrecio] = useState('');
   const [promoActivo, setPromoActivo] = useState(true);
   const [promoProductosFijos, setPromoProductosFijos] = useState([]);
@@ -659,6 +696,34 @@ function App() {
   const [umbralStockBajo, setUmbralStockBajo] = useState(50);
   const [impuestoIvaPorcentaje, setImpuestoIvaPorcentaje] = useState(19);
   const [impuestoIncluido, setImpuestoIncluido] = useState(true);
+
+  // Lista de resoluciones de pantalla soportadas
+  const RESOLUCIONES_PANTALLA = [
+    { id: '1366x768', label: '💻 1366 x 768 (HD / Notebooks - Letras Grandes)', scale: 0.90, fontSize: '15.5px' },
+    { id: '1366x768_compact', label: '💻 1366 x 768 (Compacto)', scale: 0.85, fontSize: '13.5px' },
+    { id: '1280x720', label: '💻 1280 x 720 (720p / Pantallas Pequeñas)', scale: 0.80, fontSize: '13px' },
+    { id: '1600x900', label: '🖥️ 1600 x 900 (HD+ / All-in-One)', scale: 0.92, fontSize: '14.5px' },
+    { id: '1920x1080', label: '🖥️ 1920 x 1080 (Full HD / Monitores Grandes)', scale: 1.0, fontSize: '16px' },
+    { id: '2560x1440', label: '🖥️ 2560 x 1440 (2K / Pantallas Gigantes)', scale: 1.25, fontSize: '18px' },
+    { id: 'auto', label: '🔄 Auto (Adaptación Automática)', scale: 1.0, fontSize: '15px' }
+  ];
+
+  // Estado de Resolución de Pantalla
+  const [appResolucion, setAppResolucion] = useState(() => localStorage.getItem('calibre_app_resolucion') || '1366x768');
+
+  useEffect(() => {
+    // Resetear zoom CSS del elemento raíz para evitar márgenes blancos en los bordes
+    document.documentElement.style.zoom = '1';
+
+    const match = RESOLUCIONES_PANTALLA.find(r => r.id === appResolucion) || RESOLUCIONES_PANTALLA[0];
+    
+    if (window.electronAPI && typeof window.electronAPI.setZoomFactor === 'function') {
+      window.electronAPI.setZoomFactor(match.scale);
+    }
+    
+    document.documentElement.style.fontSize = match.fontSize;
+    localStorage.setItem('calibre_app_resolucion', appResolucion);
+  }, [appResolucion]);
 
   // Selección de promociones en el POS
   const [showPromoSelectorModal, setShowPromoSelectorModal] = useState(false);
@@ -710,6 +775,28 @@ function App() {
   const [mensajeCorreoReporte, setMensajeCorreoReporte] = useState('');
   const [tipoMensajeCorreoReporte, setTipoMensajeCorreoReporte] = useState('success');
   
+  // Estados para Sub-pestaña e Impresión de Reportes
+  const [subTabReportes, setSubTabReportes] = useState('metricas'); // 'metricas' | 'impresion'
+  const [fechaInicioImpresion, setFechaInicioImpresion] = useState(() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  });
+  const [fechaFinImpresion, setFechaFinImpresion] = useState(() => {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  });
+  const [filtroTurnoImpresion, setFiltroTurnoImpresion] = useState('all');
+  const [cierreDataImpresion, setCierreDataImpresion] = useState(null);
+  const [loadingCierreImpresion, setLoadingCierreImpresion] = useState(false);
+  const [imprimiendoTipo, setImprimiendoTipo] = useState(null);
+  const [mensajeImpresion, setMensajeImpresion] = useState('');
+  
   // Estados para Cuadrado de Caja (Arqueo)
   const [fondoApertura, setFondoApertura] = useState(50000);
   const [efectivoReal, setEfectivoReal] = useState('');
@@ -717,6 +804,11 @@ function App() {
   const [cierreRegistradoData, setCierreRegistradoData] = useState(null);
   const [modoEdicionCierre, setModoEdicionCierre] = useState(false);
   const [guardandoCierre, setGuardandoCierre] = useState(false);
+
+  // Estados para Gastos en Efectivo
+  const [nuevoGastoDesc, setNuevoGastoDesc] = useState('');
+  const [nuevoGastoMonto, setNuevoGastoMonto] = useState('');
+  const [guardandoGasto, setGuardandoGasto] = useState(false);
 
   // Estado para alertas y confirmaciones personalizadas (reemplaza alert/confirm nativos de Electron)
   const [modalConfig, setModalConfig] = useState({
@@ -762,6 +854,50 @@ function App() {
   const cerrarModal = () => {
     setModalConfig(prev => ({ ...prev, isOpen: false }));
   };
+
+  // Manejador global de la tecla Enter para aceptar/confirmar alertas y modales en todo el programa
+  useEffect(() => {
+    const handleGlobalEnterKey = (e) => {
+      if (e.key !== 'Enter') return;
+
+      // No interceptar si el usuario está escribiendo en un textarea multilínea (a menos que use Ctrl+Enter)
+      if (e.target && e.target.tagName === 'TEXTAREA' && !e.ctrlKey) return;
+
+      // 1. Si hay una alerta o confirmación activa (abrirAlerta / abrirConfirmacion)
+      if (modalConfig.isOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof modalConfig.onConfirm === 'function') {
+          modalConfig.onConfirm();
+        } else {
+          cerrarModal();
+        }
+        return;
+      }
+
+      // 2. Si hay modales superpuestos en pantalla (.custom-modal-overlay)
+      const overlays = document.querySelectorAll('.custom-modal-overlay');
+      if (overlays.length > 0) {
+        // Tomar el overlay superior (último en el DOM)
+        const topOverlay = overlays[overlays.length - 1];
+
+        // Buscar botón de aceptar o confirmar principal
+        const actionBtn = topOverlay.querySelector(
+          '.custom-modal-btn-confirm, button[type="submit"]:not(:disabled), .btn-primary:not(:disabled), .comanda-btn-close'
+        );
+
+        if (actionBtn && e.target !== actionBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          actionBtn.click();
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalEnterKey, true);
+    return () => window.removeEventListener('keydown', handleGlobalEnterKey, true);
+  }, [modalConfig]);
 
   const cargarProductos = async () => {
     setProductosLoading(true);
@@ -810,6 +946,7 @@ function App() {
         precio: parseFloat(promo.precio),
         cantidad: 1,
         imagen: promo.emoji || '🎁',
+        mostrar_nombre_ticket: isOptionEnabled(promo.mostrar_nombre_ticket, true),
         productos_fijos: promo.productos_fijos || [],
         opciones_elegidas: []
       };
@@ -844,7 +981,7 @@ function App() {
 
   // Función para calcular la cantidad y el costo total de envases para llevar
   const calcularEnvases = (itemsPedido = pedido, entrega = tipoEntrega) => {
-    const unitPrice = parseFloat(precioEnvase) || 0;
+    const unitPrice = parseFloat(precioEnvaseOverride !== null ? precioEnvaseOverride : precioEnvase) || 0;
     const envasesFromProducts = getEnvaseProductsQty(itemsPedido);
 
     if (entrega !== 'Llevar') {
@@ -872,7 +1009,7 @@ function App() {
         } else if (aplica === 'heredar' || !aplica) {
           const catNombre = prodRef.categoria || item.categoria;
           const catObj = listaCategorias.find(c => c.nombre === catNombre);
-          const cobraCat = catObj ? catObj.cobra_envase !== false : true;
+          const cobraCat = catObj ? (catObj.cobra_envase === true || catObj.cobra_envase === 1 || catObj.cobra_envase === 'true') : true;
           if (cobraCat) {
             cantidadAuto += parseInt(item.cantidad) || 1;
           }
@@ -886,33 +1023,23 @@ function App() {
     return { cantidadTotal, montoTotal, unitPrice, cantidadAuto };
   };
 
+  const getOpcionExtraValue = (opc) => {
+    let extraVal = parseFloat(opc?.precio_adicional) || 0;
+    const nombreLower = (opc?.nombre_producto || '').toLowerCase();
+    if (extraVal === 0 || extraVal === 150 || extraVal === 300) {
+      if (nombreLower.includes('romano')) {
+        return 600;
+      } else if (nombreLower.includes('chacarero')) {
+        return 300;
+      }
+    }
+    return extraVal;
+  };
+
   const seleccionarOpcionPaso = (opcion) => {
     const paso = selectedPromo.pasos[currentPromoStepIndex];
     
-    // Calcular el extraVal en tiempo real contra la moda de precios del paso
-    const prodRef = productos.find(p => p.id === opcion.producto_id);
-    let extraVal = parseFloat(opcion.precio_adicional) || 0;
-    
-    const preciosOpciones = paso.opciones.map(o => {
-      const p = productos.find(pr => pr.id === o.producto_id);
-      return p ? parseFloat(p.precio) || 0 : (parseFloat(o.precio_producto) || 0);
-    }).filter(p => p > 0);
-
-    if (prodRef && preciosOpciones.length > 0) {
-      const frecs = {};
-      let maxF = 0;
-      let refP = preciosOpciones[0];
-      preciosOpciones.forEach(p => {
-        frecs[p] = (frecs[p] || 0) + 1;
-        if (frecs[p] > maxF) {
-          maxF = frecs[p];
-          refP = p;
-        }
-      });
-      const multiplier = (selectedPromo.pasos && selectedPromo.pasos.length) || 2;
-      const singleDiff = (parseFloat(prodRef.precio) || 0) - refP;
-      extraVal = singleDiff * multiplier;
-    }
+    const extraVal = getOpcionExtraValue(opcion);
 
     const choice = {
       paso_id: paso.id,
@@ -927,8 +1054,56 @@ function App() {
     if (currentPromoStepIndex < selectedPromo.pasos.length - 1) {
       setCurrentPromoStepIndex(currentPromoStepIndex + 1);
     } else {
-      const maxExtra = Math.max(...nuevasOpciones.map(opt => parseFloat(opt.precio_adicional) || 0));
-      const finalPrice = parseFloat(selectedPromo.precio) + maxExtra;
+      // Jerarquía por categoría / Dominancia del mayor recargo en la promoción:
+      // Si la promoción incluye al menos una opción con recargo positivo (ej. Romano +600 o Chacarero +300),
+      // la promoción adopta el recargo de la opción más alta elegida (Math.max de los extras positivos):
+      // - 1 Romano (+600) + 1 Barato (-200) o Estándar (0) o Chacarero (+300) -> Extra = +600 -> Total = $7.500
+      // - 2 Romanos (+600 y +600) -> Extra = +600 -> Total = $7.500
+      // - 1 Chacarero (+300) + 1 Barato (-200) o Estándar (0) -> Extra = +300 -> Total = $7.200
+      // - 2 Chacareros (+300 y +300) -> Extra = +300 -> Total = $7.200
+      // - 2 Estándar (0 y 0) -> Extra = 0 -> Total = $6.900
+      // - 2 Económicos (-200 y -200) -> Extra = -400 -> Total = $6.500
+      const extrasPositivos = nuevasOpciones
+        .map(opt => parseFloat(opt.precio_adicional) || 0)
+        .filter(val => val > 0);
+
+      let totalExtra = 0;
+      if (extrasPositivos.length > 0) {
+        totalExtra = Math.max(...extrasPositivos);
+      } else {
+        // Si NO hay opciones con recargo positivo: verificar si TODAS las opciones son económicas (-200 cada una)
+        const todasSonMenores = nuevasOpciones.length > 0 && nuevasOpciones.every(opt => (parseFloat(opt.precio_adicional) || 0) < 0);
+        if (todasSonMenores) {
+          totalExtra = nuevasOpciones.reduce((sum, opt) => sum + (parseFloat(opt.precio_adicional) || 0), 0);
+        } else {
+          totalExtra = 0;
+        }
+      }
+
+      const precioPromoCalculado = Math.max(0, parseFloat(selectedPromo.precio) + totalExtra);
+
+      let finalPrice = precioPromoCalculado;
+
+      // Evaluar si la opción "Proteger precio" está activada para ESTA promoción específica
+      const estaProteccionEncendida = selectedPromo.topar_precio_individual === true || selectedPromo.topar_precio_individual === 1 || selectedPromo.topar_precio_individual === 'true';
+
+      if (estaProteccionEncendida) {
+        const precioNormalFijos = (selectedPromo.productos_fijos || []).reduce((acc, f) => {
+          const prod = productos.find(p => String(p.id) === String(f.producto_id) || p.nombre === f.nombre);
+          return acc + ((prod ? parseFloat(prod.precio) : 0) * (parseInt(f.cantidad) || 1));
+        }, 0);
+
+        const precioNormalOpciones = nuevasOpciones.reduce((acc, opt) => {
+          const prod = productos.find(p => String(p.id) === String(opt.producto_id) || p.nombre === opt.nombre_producto);
+          return acc + (prod ? parseFloat(prod.precio) : 0);
+        }, 0);
+
+        const precioSumIndividual = precioNormalFijos + precioNormalOpciones;
+
+        if (precioSumIndividual > 0 && precioSumIndividual < precioPromoCalculado) {
+          finalPrice = precioSumIndividual;
+        }
+      }
       
       const itemPromo = {
         id: `promo-${selectedPromo.id}-${Date.now()}`,
@@ -937,6 +1112,7 @@ function App() {
         precio: finalPrice,
         cantidad: 1,
         imagen: selectedPromo.emoji || '🎁',
+        mostrar_nombre_ticket: isOptionEnabled(selectedPromo.mostrar_nombre_ticket, true),
         productos_fijos: selectedPromo.productos_fijos || [],
         opciones_elegidas: nuevasOpciones.map(opt => ({
           producto_id: opt.producto_id,
@@ -954,7 +1130,7 @@ function App() {
     if (paso.autocalcular === false) return paso;
     
     const precios = paso.opciones.map(o => {
-      const prod = productos.find(p => p.id === o.producto_id);
+      const prod = productos.find(p => String(p.id) === String(o.producto_id));
       return prod ? parseFloat(prod.precio) || 0 : (parseFloat(o.precio_producto) || 0);
     }).filter(p => p > 0);
 
@@ -977,9 +1153,15 @@ function App() {
     });
 
     const nuevasOpciones = paso.opciones.map(o => {
-      const prod = productos.find(p => p.id === o.producto_id);
+      const prod = productos.find(p => String(p.id) === String(o.producto_id));
       const pPrecio = prod ? parseFloat(prod.precio) || 0 : (parseFloat(o.precio_producto) || 0);
-      const extra = Math.max(0, pPrecio - precioModa);
+      let extra = pPrecio - precioModa;
+      const nom = (o.nombre_producto || prod?.nombre || '').toLowerCase();
+      if (nom.includes('romano')) {
+        extra = 600;
+      } else if (nom.includes('chacarero')) {
+        extra = 300;
+      }
       return {
         ...o,
         precio_adicional: extra
@@ -1022,7 +1204,7 @@ function App() {
     for (let i = 1; i <= cant; i++) {
       const opciones = prodsCat.map(p => {
         const pPrecio = parseFloat(p.precio) || 0;
-        const extra = Math.max(0, pPrecio - precioModa);
+        const extra = pPrecio - precioModa;
         return {
           producto_id: p.id,
           nombre_producto: p.nombre,
@@ -1032,7 +1214,7 @@ function App() {
       });
 
       nuevosPasos.push({
-        temp_id: Date.now() + Math.random() + i,
+        temp_id: Date.now().toString() + '-' + Math.random().toString().substring(2) + '-' + i,
         nombre_paso: `Elige ${genCatSelected} #${i}`,
         obligatorio: true,
         autocalcular: true,
@@ -1040,7 +1222,14 @@ function App() {
       });
     }
 
-    setPromoPasos(prev => [...prev, ...nuevosPasos]);
+    // Reemplazar pasos existentes de la misma categoría para evitar duplicaciones
+    const catLower = genCatSelected.toLowerCase().trim();
+    const pasosFiltrados = promoPasos.filter(p => {
+      const nombreLower = (p.nombre_paso || '').toLowerCase().trim();
+      return !nombreLower.includes(catLower);
+    });
+
+    setPromoPasos([...pasosFiltrados, ...nuevosPasos]);
     setShowGenCatSection(false);
     setGenCatSelected('');
     setGenCatCantidad(2);
@@ -1050,7 +1239,7 @@ function App() {
     setPromoPasos([
       ...promoPasos,
       {
-        temp_id: Date.now() + Math.random(),
+        temp_id: Date.now().toString() + '-' + Math.random().toString().substring(2),
         nombre_paso: '',
         obligatorio: true,
         autocalcular: true,
@@ -1059,27 +1248,37 @@ function App() {
     ]);
   };
 
+  const isStepMatch = (p, targetId, isRealId) => {
+    if (isRealId && p.id != null) {
+      return String(p.id) === String(targetId);
+    }
+    if (p.temp_id != null) {
+      return String(p.temp_id) === String(targetId);
+    }
+    return String(p.id) === String(targetId);
+  };
+
   const eliminarPasoPromoForm = (tempIdOrRealId, isRealId) => {
-    setPromoPasos(promoPasos.filter(p => isRealId ? p.id !== tempIdOrRealId : p.temp_id !== tempIdOrRealId));
+    setPromoPasos(promoPasos.filter(p => String(p.id) !== String(tempIdOrRealId) && String(p.temp_id) !== String(tempIdOrRealId)));
   };
 
   const actualizarNombrePasoForm = (tempIdOrRealId, isRealId, val) => {
     setPromoPasos(promoPasos.map(p => {
-      const match = isRealId ? p.id === tempIdOrRealId : p.temp_id === tempIdOrRealId;
+      const match = isStepMatch(p, tempIdOrRealId, isRealId);
       return match ? { ...p, nombre_paso: val } : p;
     }));
   };
 
   const actualizarObligatorioPasoForm = (tempIdOrRealId, isRealId, val) => {
     setPromoPasos(promoPasos.map(p => {
-      const match = isRealId ? p.id === tempIdOrRealId : p.temp_id === tempIdOrRealId;
+      const match = isStepMatch(p, tempIdOrRealId, isRealId);
       return match ? { ...p, obligatorio: val } : p;
     }));
   };
 
   const toggleAutocalcularPasoForm = (pasoTempIdOrRealId, isRealId, val) => {
     setPromoPasos(promoPasos.map(p => {
-      const match = isRealId ? p.id === pasoTempIdOrRealId : p.temp_id === pasoTempIdOrRealId;
+      const match = isStepMatch(p, pasoTempIdOrRealId, isRealId);
       if (!match) return p;
 
       let stepMod = { ...p, autocalcular: val };
@@ -1087,6 +1286,38 @@ function App() {
         stepMod = recalcularExtrasPaso(stepMod);
       }
       return stepMod;
+    }));
+  };
+
+  const aplicarBaseManualPasoForm = (pasoTempIdOrRealId, isRealId, baseVal) => {
+    const basePrice = parseFloat(baseVal) || 0;
+    setPromoPasos(promoPasos.map(p => {
+      const match = isStepMatch(p, pasoTempIdOrRealId, isRealId);
+      if (!match) return p;
+
+      const nuevasOpciones = p.opciones.map(o => {
+        const pPrecio = parseFloat(o.precio_producto) || 0;
+        const extra = pPrecio - basePrice;
+        return { ...o, precio_adicional: extra };
+      });
+
+      return { ...p, autocalcular: false, precio_base_manual: baseVal, opciones: nuevasOpciones };
+    }));
+  };
+
+  const fijarSinExtraOpcionForm = (pasoTempIdOrRealId, isRealId, productoId) => {
+    setPromoPasos(promoPasos.map(p => {
+      const match = isStepMatch(p, pasoTempIdOrRealId, isRealId);
+      if (!match) return p;
+
+      const nuevasOpciones = p.opciones.map(o => {
+        if (String(o.producto_id) === String(productoId)) {
+          return { ...o, precio_adicional: 0 };
+        }
+        return o;
+      });
+
+      return { ...p, opciones: nuevasOpciones };
     }));
   };
 
@@ -1099,12 +1330,12 @@ function App() {
     }
 
     setPromoPasos(promoPasos.map(p => {
-      const match = isRealId ? p.id === pasoTempIdOrRealId : p.temp_id === pasoTempIdOrRealId;
+      const match = isStepMatch(p, pasoTempIdOrRealId, isRealId);
       if (!match) return p;
 
       const nuevasOpciones = [...p.opciones];
       prodsCat.forEach(prod => {
-        if (!nuevasOpciones.some(o => o.producto_id === prod.id)) {
+        if (!nuevasOpciones.some(o => String(o.producto_id) === String(prod.id))) {
           nuevasOpciones.push({
             producto_id: prod.id,
             nombre_producto: prod.nombre,
@@ -1124,14 +1355,14 @@ function App() {
   };
 
   const agregarOpcionAlPasoForm = (pasoTempIdOrRealId, isRealId, productoId, precioAdicional) => {
-    const prod = productos.find(p => p.id === parseInt(productoId));
+    const prod = productos.find(p => String(p.id) === String(productoId));
     if (!prod) return;
 
     setPromoPasos(promoPasos.map(p => {
-      const match = isRealId ? p.id === pasoTempIdOrRealId : p.temp_id === pasoTempIdOrRealId;
+      const match = isStepMatch(p, pasoTempIdOrRealId, isRealId);
       if (!match) return p;
 
-      if (p.opciones.some(o => o.producto_id === prod.id)) {
+      if (p.opciones.some(o => String(o.producto_id) === String(prod.id))) {
         abrirAlerta('Este producto ya está agregado en este paso.', 'Opción Duplicada');
         return p;
       }
@@ -1142,7 +1373,7 @@ function App() {
           producto_id: prod.id,
           nombre_producto: prod.nombre,
           precio_producto: prod.precio,
-          precio_adicional: p.autocalcular !== false ? 0.00 : (parseFloat(precioAdicional) || 0.00)
+          precio_adicional: p.autocalcular !== false ? 0 : (parseInt(precioAdicional.toString().replace(/\D/g, ''), 10) || 0)
         }
       ];
 
@@ -1157,10 +1388,10 @@ function App() {
 
   const eliminarOpcionDelPasoForm = (pasoTempIdOrRealId, isRealId, productoId) => {
     setPromoPasos(promoPasos.map(p => {
-      const match = isRealId ? p.id === pasoTempIdOrRealId : p.temp_id === pasoTempIdOrRealId;
+      const match = isStepMatch(p, pasoTempIdOrRealId, isRealId);
       if (!match) return p;
 
-      const nuevasOpciones = p.opciones.filter(o => o.producto_id !== productoId);
+      const nuevasOpciones = p.opciones.filter(o => String(o.producto_id) !== String(productoId));
       let stepConOpc = { ...p, opciones: nuevasOpciones };
       if (stepConOpc.autocalcular !== false) {
         stepConOpc = recalcularExtrasPaso(stepConOpc);
@@ -1172,12 +1403,14 @@ function App() {
 
   const actualizarPrecioAdicionalOpcionForm = (pasoTempIdOrRealId, isRealId, productoId, val) => {
     setPromoPasos(promoPasos.map(p => {
-      const match = isRealId ? p.id === pasoTempIdOrRealId : p.temp_id === pasoTempIdOrRealId;
+      const match = isStepMatch(p, pasoTempIdOrRealId, isRealId);
       if (!match) return p;
 
       const nuevasOpciones = p.opciones.map(o => {
-        if (o.producto_id === productoId) {
-          return { ...o, precio_adicional: parseFloat(val) || 0.00 };
+        if (String(o.producto_id) === String(productoId)) {
+          const cleanVal = val.toString().replace(/[^\d-]/g, '');
+          const parsed = parseInt(cleanVal, 10);
+          return { ...o, precio_adicional: isNaN(parsed) ? 0 : parsed };
         }
         return o;
       });
@@ -1191,10 +1424,10 @@ function App() {
     if (!prod) return;
     const cant = parseInt(cantidad) || 1;
 
-    const existe = promoProductosFijos.find(pf => pf.producto_id === prod.id);
+    const existe = promoProductosFijos.find(pf => String(pf.producto_id) === String(prod.id));
     if (existe) {
       setPromoProductosFijos(promoProductosFijos.map(pf =>
-        pf.producto_id === prod.id ? { ...pf, cantidad: pf.cantidad + cant } : pf
+        String(pf.producto_id) === String(prod.id) ? { ...pf, cantidad: pf.cantidad + cant } : pf
       ));
     } else {
       setPromoProductosFijos([
@@ -1210,19 +1443,67 @@ function App() {
   };
 
   const eliminarProductoFijoPromoForm = (productoId) => {
-    setPromoProductosFijos(promoProductosFijos.filter(pf => pf.producto_id !== productoId));
+    setPromoProductosFijos(promoProductosFijos.filter(pf => String(pf.producto_id) !== String(productoId)));
   };
 
   const handleSavePromo = async (e) => {
     e.preventDefault();
+    if (promoLoading) return;
     if (!promoNombre.trim() || !promoPrecio.toString().trim()) {
       setPromoError('Completa todos los campos obligatorios (nombre y precio).');
       setPromoSuccess('');
       return;
     }
 
-    let finalFijos = [...promoProductosFijos];
-    let finalPasos = [...promoPasos];
+    // Deduplicar productos fijos sumando cantidades
+    const fijosMap = new Map();
+    for (const pf of promoProductosFijos) {
+      if (pf && pf.producto_id) {
+        const pid = String(pf.producto_id);
+        const cant = parseInt(pf.cantidad, 10) || 1;
+        if (fijosMap.has(pid)) {
+          const item = fijosMap.get(pid);
+          item.cantidad += cant;
+        } else {
+          fijosMap.set(pid, { ...pf, producto_id: parseInt(pid, 10), cantidad: cant });
+        }
+      }
+    }
+    let finalFijos = Array.from(fijosMap.values());
+
+    // Deduplicar pasos por clave compuesta (nombre de paso + lista de productos de sus opciones)
+    const pasosMap = new Map();
+    for (const paso of promoPasos) {
+      const opcIds = (paso.opciones || [])
+        .map(o => String(o.producto_id || ''))
+        .filter(Boolean)
+        .sort()
+        .join(',');
+      const key = `${(paso.nombre_paso || '').trim().toLowerCase()}_[${opcIds}]`;
+      if (!pasosMap.has(key)) {
+        pasosMap.set(key, paso);
+      }
+    }
+    const pasosUnicos = Array.from(pasosMap.values());
+
+    // Deduplicar opciones dentro de cada paso
+    let finalPasos = pasosUnicos.map(paso => {
+      const opcMap = new Map();
+      if (paso.opciones && Array.isArray(paso.opciones)) {
+        for (const opc of paso.opciones) {
+          if (opc && opc.producto_id) {
+            const pid = String(opc.producto_id);
+            if (!opcMap.has(pid)) {
+              opcMap.set(pid, { ...opc, producto_id: parseInt(pid, 10) });
+            }
+          }
+        }
+      }
+      return {
+        ...paso,
+        opciones: Array.from(opcMap.values())
+      };
+    });
 
     if (finalPasos.length === 0 && finalFijos.length === 0) {
       setPromoError('Una promoción debe incluir al menos un producto fijo o un paso de selección.');
@@ -1260,13 +1541,15 @@ function App() {
         },
         body: JSON.stringify({
           nombre: promoNombre.trim(),
-          precio: parseFloat(promoPrecio),
+          precio: parseInt(promoPrecio.toString().replace(/\D/g, ''), 10) || 0,
           activo: promoActivo,
           productos_fijos: finalFijos,
           pasos: finalPasos,
           emoji: promoEmoji,
           aplica_envase: promoAplicaEnvase,
-          cantidad_envases: promoCantidadEnvases
+          cantidad_envases: promoCantidadEnvases,
+          topar_precio_individual: promoToparPrecioIndividual,
+          mostrar_nombre_ticket: promoMostrarNombreTicket
         })
       });
       const data = await response.json();
@@ -1278,6 +1561,8 @@ function App() {
         setPromoActivo(true);
         setPromoAplicaEnvase('no');
         setPromoCantidadEnvases(1);
+        setPromoToparPrecioIndividual(false);
+        setPromoMostrarNombreTicket(true);
         setPromoProductosFijos([]);
         setPromoPasos([]);
         setEditandoPromoId(null);
@@ -1294,6 +1579,27 @@ function App() {
     }
   };
 
+  const iniciarNuevaPromo = () => {
+    setEditandoPromoId(null);
+    setPromoNombre('');
+    setPromoPrecio('');
+    setPromoEmoji('🎁');
+    setPromoActivo(true);
+    setPromoAplicaEnvase('no');
+    setPromoCantidadEnvases(1);
+    setPromoToparPrecioIndividual(false);
+    setPromoMostrarNombreTicket(true);
+    setPromoProductosFijos([]);
+    setPromoPasos([]);
+    setSelectedFixedProdId('');
+    setSelectedStepProds({});
+    setGenCatSelected('');
+    setGenCatCantidad(2);
+    setPromoError('');
+    setPromoSuccess('');
+    setPromocionesView('create');
+  };
+
   const iniciarEdicionPromo = (promo) => {
     setEditandoPromoId(promo.id);
     setPromoNombre(promo.nombre);
@@ -1302,10 +1608,13 @@ function App() {
     setPromoActivo(promo.activo !== false);
     setPromoAplicaEnvase(promo.aplica_envase || 'no');
     setPromoCantidadEnvases(promo.cantidad_envases || 1);
+    setPromoToparPrecioIndividual(promo.topar_precio_individual === true || promo.topar_precio_individual === 1 || promo.topar_precio_individual === 'true');
+    setPromoMostrarNombreTicket(isOptionEnabled(promo.mostrar_nombre_ticket, true));
     setPromoProductosFijos(promo.productos_fijos || []);
-    setPromoPasos((promo.pasos || []).map(paso => ({
+    setPromoPasos((promo.pasos || []).map((paso, idx) => ({
       ...paso,
-      temp_id: paso.id || (Date.now() + Math.random())
+      autocalcular: paso.autocalcular === true || paso.autocalcular === 1 || paso.autocalcular === 'true',
+      temp_id: String(paso.id || paso.temp_id || `paso-${idx}-${Date.now()}`)
     })));
 
     setSelectedFixedProdId('');
@@ -1347,7 +1656,7 @@ function App() {
         if (data.activo) {
           setActiveShift(data.turno);
           if (mostrarPromptAlIniciar) {
-            abrirAlerta(`Se continuará trabajando en el Turno #${data.turno.id} activo, iniciado por ${data.turno.usuario_inicio} el ${new Date(data.turno.fecha_hora_inicio).toLocaleDateString('es-CL')} a las ${new Date(data.turno.fecha_hora_inicio).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}.`, 'Turno Activo Detectado');
+            abrirAlerta(`Se continuará trabajando en el Turno #${data.turno.id} activo, iniciado por ${data.turno.usuario_inicio} el ${formatFechaHoraChile(data.turno.fecha_hora_inicio)}.`, 'Turno Activo Detectado');
             setShowShiftPrompt(false);
           }
         } else {
@@ -1381,7 +1690,8 @@ function App() {
       const data = await response.json();
       if (response.ok && data.success) {
         setActiveShift(data.turno);
-        abrirAlerta('Se ha iniciado un nuevo turno correctamente.', 'Turno Iniciado');
+        setActiveTab('pedidos');
+        abrirAlerta('Se ha iniciado un nuevo turno correctamente. La pestaña de pedidos ha sido habilitada.', 'Turno Iniciado');
         cargarHistorialTurnos();
       } else {
         abrirAlerta(data.message || 'Error al iniciar el turno.', 'Error');
@@ -1419,6 +1729,139 @@ function App() {
       console.error('Error al cerrar turno:', err);
       abrirAlerta('Error de red al intentar cerrar el turno.', 'Error de Conexión');
     }
+  };
+
+  const imprimirReporteFinancieroModal = async (finalCashVal, obsVal) => {
+    if (!activeShift) return;
+    if (!window.electronAPI) {
+      abrirAlerta('La función de impresión de tickets solo está disponible en la aplicación de escritorio.', 'Aviso');
+      return;
+    }
+
+    let salesInfo = activeShiftSalesInfo;
+    if (!salesInfo) {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const resp = await fetch(`http://127.0.0.1:5000/api/informes/cierre?fecha=${today}&turno_id=${activeShift.id}`);
+        const json = await resp.json();
+        if (resp.ok && json.success) {
+          salesInfo = json.data;
+          setActiveShiftSalesInfo(salesInfo);
+        }
+      } catch (e) {
+        console.error("Error al obtener ventas del turno para imprimir:", e);
+      }
+    }
+
+    const declaredCash = (finalCashVal !== undefined && finalCashVal !== '' && !isNaN(parseFloat(finalCashVal)))
+      ? parseFloat(finalCashVal)
+      : (efectivoFinalInput !== '' && !isNaN(parseFloat(efectivoFinalInput)))
+        ? parseFloat(efectivoFinalInput)
+        : null;
+
+    const totalEfectivo = salesInfo?.total_efectivo || 0;
+    const totalGastos = salesInfo?.total_gastos || 0;
+    const expectedCash = (activeShift.efectivo_inicial || 0) + totalEfectivo - totalGastos;
+    const hasArqueo = declaredCash !== null;
+    const diff = hasArqueo ? declaredCash - expectedCash : 0;
+
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    window.electronAPI.printReport({
+      tipo_reporte: 'financiero',
+      fecha: todayStr,
+      turno_nombre: `Turno #${activeShift.id}`,
+      total_ventas: salesInfo?.total_ventas || 0,
+      total_efectivo: totalEfectivo,
+      total_debito: salesInfo?.total_debito || 0,
+      total_credito: salesInfo?.total_credito || 0,
+      total_tarjeta: salesInfo?.total_tarjeta || 0,
+      total_gastos: totalGastos,
+      gastos: salesInfo?.gastos || [],
+      productos_vendidos: salesInfo?.productos_vendidos || [],
+      envases_vendidos: salesInfo?.envases_vendidos || { cantidad: 0, total_pesos: 0 },
+      productos_promociones: salesInfo?.productos_promociones || [],
+      comandas_eliminadas: salesInfo?.comandas_eliminadas || [],
+      monto_total_eliminado: salesInfo?.monto_total_eliminado || 0,
+      has_arqueo: hasArqueo,
+      cargado_por: user?.nombre || activeShift.usuario_inicio || 'Cajero',
+      fondo_apertura: parseFloat(activeShift.efectivo_inicial || 0),
+      efectivo_real: declaredCash !== null ? declaredCash : 0,
+      diferencia: diff,
+      observaciones: obsVal !== undefined ? obsVal : (observacionesCerrarShiftInput || '')
+    });
+  };
+
+  const imprimirReporteInventarioModal = async () => {
+    if (!activeShift || !activeShiftSalesInfo) {
+      abrirAlerta('Los datos del turno aún se están calculando. Por favor espera un momento.', 'Cargando Datos');
+      return;
+    }
+    if (!window.electronAPI) {
+      abrirAlerta('La función de impresión de tickets solo está disponible en la aplicación de escritorio.', 'Aviso');
+      return;
+    }
+
+    let stockActual = listaIngredientes;
+    if (!stockActual || stockActual.length === 0) {
+      try {
+        const resp = await fetch('http://127.0.0.1:5000/api/ingredientes');
+        const dataIng = await resp.json();
+        if (resp.ok && dataIng.success && dataIng.ingredientes) {
+          stockActual = dataIng.ingredientes;
+          setListaIngredientes(dataIng.ingredientes);
+        }
+      } catch (e) {
+        console.error('Error al obtener inventario actual:', e);
+      }
+    }
+
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    window.electronAPI.printReport({
+      tipo_reporte: 'inventario',
+      fecha: todayStr,
+      turno_nombre: `Turno #${activeShift.id}`,
+      ingredientes_gastados: activeShiftSalesInfo.ingredientes_gastados || [],
+      entradas_inventario: activeShiftSalesInfo.entradas_inventario || [],
+      mermas_inventario: activeShiftSalesInfo.mermas_inventario || [],
+      inventario_actual: stockActual || []
+    });
+  };
+
+  const imprimirReporteProductosModal = () => {
+    if (!activeShift || !activeShiftSalesInfo) {
+      abrirAlerta('Los datos del turno aún se están calculando. Por favor espera un momento.', 'Cargando Datos');
+      return;
+    }
+    if (!window.electronAPI) {
+      abrirAlerta('La función de impresión de tickets solo está disponible en la aplicación de escritorio.', 'Aviso');
+      return;
+    }
+
+    const unificadosConCategoria = (activeShiftSalesInfo.productos_unificados || []).map(item => {
+      const prod = productos.find(p => p.nombre.toLowerCase().trim() === item.nombre_producto.toLowerCase().trim());
+      const catName = item.categoria || prod?.categoria || (item.nombre_producto === 'Envases para llevar' ? 'Envases' : 'Otros');
+      const catObj = listaCategorias.find(c => c.nombre.toLowerCase().trim() === catName.toLowerCase().trim());
+      return {
+        ...item,
+        categoria: catName,
+        categoria_emoji: item.categoria_emoji || catObj?.emoji || '🏷️',
+        categoria_orden: item.categoria_orden !== undefined ? item.categoria_orden : (catObj?.orden !== undefined ? catObj.orden : 999)
+      };
+    });
+
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    window.electronAPI.printReport({
+      fecha: todayStr,
+      tipo_reporte: 'consolidado',
+      productos_unificados: unificadosConCategoria,
+      categorias_orden: listaCategorias.map(c => c.nombre)
+    });
   };
 
   const cargarHistorialTurnos = async () => {
@@ -1483,7 +1926,14 @@ function App() {
       setConfigError('');
       
       const config = {
+        precio_envase: String(parseInt(precioEnvase, 10) || 0),
         REPORT_EMAIL_TO: configEmailTo,
+        REPORT_EMAIL_FROM: configSmtpUser,
+        SMTP_HOST: configSmtpHost,
+        SMTP_PORT: String(configSmtpPort),
+        SMTP_SECURE: configSmtpSecure ? 'true' : 'false',
+        SMTP_USER: configSmtpUser,
+        SMTP_PASS: configSmtpPass,
         LOCAL_NOMBRE: localNombre,
         LOCAL_DIRECCION: localDireccion,
         LOCAL_TELEFONO: localTelefono,
@@ -1511,6 +1961,8 @@ function App() {
       const data = await response.json();
       if (response.ok && data.success) {
         setConfigSuccess('Configuración guardada correctamente.');
+        await cargarConfiguracion();
+        await cargarProductos();
       } else {
         setConfigError(data.message || 'Error al guardar la configuración.');
       }
@@ -1707,7 +2159,8 @@ function App() {
         body: JSON.stringify({ 
           nombre: nuevaCategoriaNombre.trim(),
           emoji: nuevaCategoriaEmoji.trim() || '🏷️',
-          cobra_envase: nuevaCatCobraEnvase
+          cobra_envase: nuevaCatCobraEnvase,
+          asignar_envase: nuevaCatAsignarEnvase
         }),
       });
       const data = await response.json();
@@ -1716,7 +2169,9 @@ function App() {
         setNuevaCategoriaNombre('');
         setNuevaCategoriaEmoji('🏷️');
         setNuevaCatCobraEnvase(true);
-        cargarCategorias();
+        setNuevaCatAsignarEnvase(false);
+        await cargarCategorias();
+        await cargarProductos();
         setProdCategoria(data.categoria.nombre);
         setTimeout(() => {
           setCatSuccess('');
@@ -1736,7 +2191,9 @@ function App() {
     setEditandoCatId(cat.id);
     setNuevaCategoriaNombre(cat.nombre);
     setNuevaCategoriaEmoji(cat.emoji || '🏷️');
-    setNuevaCatCobraEnvase(cat.cobra_envase !== false);
+    setNuevaCatCobraEnvase(cat.cobra_envase === true || cat.cobra_envase === 1 || cat.cobra_envase === 'true');
+    const envaseProd = productos.find(p => p.id === 108 || p.nombre?.toLowerCase().includes('envase para llevar'));
+    setNuevaCatAsignarEnvase(Boolean(envaseProd && envaseProd.categoria?.toLowerCase() === cat.nombre?.toLowerCase()));
     setCatError('');
     setCatSuccess('');
   };
@@ -1746,6 +2203,7 @@ function App() {
     setNuevaCategoriaNombre('');
     setNuevaCategoriaEmoji('🏷️');
     setNuevaCatCobraEnvase(true);
+    setNuevaCatAsignarEnvase(false);
     setCatError('');
     setCatSuccess('');
   };
@@ -1768,7 +2226,8 @@ function App() {
         body: JSON.stringify({ 
           nombre: nuevaCategoriaNombre.trim(),
           emoji: nuevaCategoriaEmoji.trim() || '🏷️',
-          cobra_envase: nuevaCatCobraEnvase
+          cobra_envase: nuevaCatCobraEnvase,
+          asignar_envase: nuevaCatAsignarEnvase
         }),
       });
       const data = await response.json();
@@ -1777,6 +2236,7 @@ function App() {
         setNuevaCategoriaNombre('');
         setNuevaCategoriaEmoji('🏷️');
         setNuevaCatCobraEnvase(true);
+        setNuevaCatAsignarEnvase(false);
         setEditandoCatId(null);
         await cargarCategorias();
         await cargarProductos();
@@ -1789,6 +2249,29 @@ function App() {
     } catch (err) {
       console.error(err);
       setCatError('Error de red al conectar con el servidor.');
+    }
+  };
+
+  const toggleEnvaseEnCategoria = async (catNombre, asignar) => {
+    try {
+      setProdError('');
+      setProdSuccess('');
+      const response = await fetch('http://127.0.0.1:5000/api/productos/asignar-envase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categoria: catNombre, asignar })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setProdSuccess(data.message);
+        await cargarProductos();
+        setTimeout(() => setProdSuccess(''), 3500);
+      } else {
+        setProdError(data.message || 'Error al actualizar asignación de envase.');
+      }
+    } catch (err) {
+      console.error(err);
+      setProdError('Error de red al conectar con el servidor.');
     }
   };
 
@@ -1888,7 +2371,7 @@ function App() {
         },
         body: JSON.stringify({
           nombre: prodNombre.trim(),
-          precio: parseFloat(prodPrecio),
+          precio: parseInt(prodPrecio.toString().replace(/\D/g, ''), 10) || 0,
           imagen: prodImagen.trim() || '🍔',
           categoria: prodCategoria.trim(),
           aplica_envase: prodAplicaEnvase,
@@ -2379,13 +2862,15 @@ function App() {
 
 
   useEffect(() => {
-    if (user && (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre' || activeTab === 'promociones' || activeTab === 'configuraciones' || activeTab === 'reportes')) {
-      cargarIngredientes();
-      cargarCategorias();
-      cargarProductos();
-      cargarPromociones();
-      if (activeTab === 'cierre' || activeTab === 'configuraciones' || activeTab === 'reportes') {
+    if (user) {
+      if (activeTab === 'ventas' || activeTab === 'cierre' || activeTab === 'configuraciones' || activeTab === 'reportes') {
         cargarConfiguracion();
+      }
+      if (activeTab === 'productos' || activeTab === 'categorias' || activeTab === 'inventario' || activeTab === 'cierre' || activeTab === 'promociones' || activeTab === 'configuraciones' || activeTab === 'reportes' || activeTab === 'ventas') {
+        cargarIngredientes();
+        cargarCategorias();
+        cargarProductos();
+        cargarPromociones();
         if (activeTab === 'cierre') {
           cargarHistorialTurnos();
         }
@@ -2398,9 +2883,37 @@ function App() {
     setCatProductView('list');
   }, [activeTab]);
 
-  const cargarCuadradoCaja = async (dateStr, efectivoSugerido) => {
+  const cargarCuadradoCaja = async (dateStr, efectivoSugerido, shiftFilterStr) => {
     const targetDate = dateStr || fechaCierre;
+    const targetShift = shiftFilterStr !== undefined ? shiftFilterStr : filtroTurnoCierre;
+    const isShift = (targetShift && targetShift !== 'all' && targetShift !== 'todos' && targetShift !== 'undefined');
     if (!targetDate) return;
+
+    if (isShift) {
+      const foundShift = listaTurnos.find(t => String(t.id) === String(targetShift));
+      if (foundShift) {
+        if (!foundShift.activo) {
+          setCierreRegistradoData({
+            fondo_apertura: foundShift.efectivo_inicial,
+            efectivo_real: foundShift.efectivo_final,
+            diferencia: foundShift.diferencia,
+            observaciones: foundShift.observaciones || '',
+            cargado_por: foundShift.usuario_fin || foundShift.usuario_inicio
+          });
+          setFondoApertura(foundShift.efectivo_inicial);
+          setEfectivoReal(foundShift.efectivo_final !== undefined && foundShift.efectivo_final !== null ? foundShift.efectivo_final.toString() : '');
+          setObservacionesCierre(foundShift.observaciones || '');
+        } else {
+          setCierreRegistradoData(null);
+          setFondoApertura(foundShift.efectivo_inicial);
+          setEfectivoReal('');
+          setObservacionesCierre('');
+        }
+        setModoEdicionCierre(false);
+        return;
+      }
+    }
+
     try {
       const response = await fetch(`http://127.0.0.1:5000/api/cierres/${targetDate}`);
       const data = await response.json();
@@ -2413,7 +2926,7 @@ function App() {
           setModoEdicionCierre(false);
         } else {
           setCierreRegistradoData(null);
-          setFondoApertura(efectivoSugerido !== undefined ? efectivoSugerido : 50000);
+          setFondoApertura(efectivoSugerido !== undefined ? efectivoSugerido : (activeShift?.efectivo_inicial || 50000));
           setEfectivoReal('');
           setObservacionesCierre('');
           setModoEdicionCierre(false);
@@ -2435,7 +2948,7 @@ function App() {
       const data = await response.json();
       if (response.ok && data.success) {
         setCierreData(data.data);
-        await cargarCuadradoCaja(targetDate, data.data.efectivo_inicial_sugerido);
+        await cargarCuadradoCaja(targetDate, data.data.efectivo_inicial_sugerido, targetShift);
       } else {
         setErrorCierre(data.message || 'Error al cargar el cierre de caja.');
       }
@@ -2531,15 +3044,106 @@ function App() {
     }
   };
 
-  const descargarExcelMensual = () => {
-    if (!mesExcel) return;
-    window.open(`http://127.0.0.1:5000/api/informes/excel?mes=${mesExcel}`);
+  const handleAgregarGasto = async (e) => {
+    e.preventDefault();
+    if (!nuevoGastoDesc.trim() || !nuevoGastoMonto || parseFloat(nuevoGastoMonto) <= 0) {
+      abrirAlerta('Por favor ingresa una descripción válida y un monto mayor a 0.', 'Datos Incompletos');
+      return;
+    }
+
+    setGuardandoGasto(true);
+    try {
+      const targetShift = (filtroTurnoCierre && filtroTurnoCierre !== 'all' && filtroTurnoCierre !== 'todos' && filtroTurnoCierre !== 'undefined') ? filtroTurnoCierre : (activeShift?.id || null);
+      const response = await fetch('http://127.0.0.1:5000/api/gastos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          descripcion: nuevoGastoDesc.trim(),
+          monto: parseFloat(nuevoGastoMonto),
+          registrado_por: user?.nombre || 'Cajero',
+          turno_id: targetShift,
+          fecha: fechaCierre
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setNuevoGastoDesc('');
+        setNuevoGastoMonto('');
+        abrirAlerta('Gasto en efectivo registrado correctamente.', 'Éxito');
+        cargarCierreCaja(fechaCierre, filtroTurnoCierre);
+      } else {
+        abrirAlerta(data.message || 'Error al registrar el gasto.', 'Error');
+      }
+    } catch (err) {
+      console.error(err);
+      abrirAlerta('Error de conexión al guardar el gasto.', 'Error de Conexión');
+    } finally {
+      setGuardandoGasto(false);
+    }
   };
 
-  const descargarReporteProductosRango = () => {
-    if (!fechaInicioReporte || !fechaFinReporte) return;
-    window.open(`http://127.0.0.1:5000/api/informes/rango-productos/excel?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`);
+  const handleEliminarGasto = (gastoId, gastoDesc) => {
+    abrirConfirmacion(
+      `¿Estás seguro de eliminar el gasto "${gastoDesc}"?`,
+      'Eliminar Gasto',
+      async () => {
+        try {
+          const response = await fetch(`http://127.0.0.1:5000/api/gastos/${gastoId}`, {
+            method: 'DELETE'
+          });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            abrirAlerta('El gasto ha sido eliminado.', 'Éxito');
+            cargarCierreCaja(fechaCierre, filtroTurnoCierre);
+          } else {
+            abrirAlerta(data.message || 'Error al eliminar el gasto.', 'Error');
+          }
+        } catch (err) {
+          console.error(err);
+          abrirAlerta('Error de conexión al eliminar el gasto.', 'Error de Conexión');
+        }
+      }
+    );
   };
+
+  const descargarExcelMensual = async () => {
+    if (!mesExcel) return;
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/informes/excel?mes=${mesExcel}`);
+      if (!response.ok) throw new Error('Error al descargar');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Reporte_Calibre_${mesExcel}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Error al descargar excel mensual:', e);
+    }
+  };
+
+  const descargarReporteProductosRango = async () => {
+    if (!fechaInicioReporte || !fechaFinReporte) return;
+    try {
+      const response = await fetch(`http://127.0.0.1:5000/api/informes/rango-productos/excel?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`);
+      if (!response.ok) throw new Error('Error al descargar');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Reporte_Productos_${fechaInicioReporte}_al_${fechaFinReporte}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Error al descargar reporte de productos:', e);
+    }
+  };
+
 
   const aplicarPresetFecha = (preset) => {
     const now = new Date();
@@ -2613,6 +3217,318 @@ function App() {
     }
   }, [user, activeTab, fechaInicioReporte, fechaFinReporte, agrupacionGrafico]);
 
+  const aplicarPresetImpresion = (tipo) => {
+    const hoy = new Date();
+    const formatDate = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+
+    if (tipo === 'hoy') {
+      const hoyStr = formatDate(hoy);
+      setFechaInicioImpresion(hoyStr);
+      setFechaFinImpresion(hoyStr);
+      setFiltroTurnoImpresion('all');
+    } else if (tipo === 'ayer') {
+      const ayer = new Date();
+      ayer.setDate(hoy.getDate() - 1);
+      const ayerStr = formatDate(ayer);
+      setFechaInicioImpresion(ayerStr);
+      setFechaFinImpresion(ayerStr);
+      setFiltroTurnoImpresion('all');
+    } else if (tipo === '7dias') {
+      const hace7 = new Date();
+      hace7.setDate(hoy.getDate() - 6);
+      setFechaInicioImpresion(formatDate(hace7));
+      setFechaFinImpresion(formatDate(hoy));
+      setFiltroTurnoImpresion('all');
+    } else if (tipo === 'esteMes') {
+      const primero = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+      setFechaInicioImpresion(formatDate(primero));
+      setFechaFinImpresion(formatDate(hoy));
+      setFiltroTurnoImpresion('all');
+    } else if (tipo === 'mesPasado') {
+      const primero = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+      const ultimo = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+      setFechaInicioImpresion(formatDate(primero));
+      setFechaFinImpresion(formatDate(ultimo));
+      setFiltroTurnoImpresion('all');
+    }
+  };
+
+  const cargarCierreParaImpresion = async (targetStart, targetEnd, targetShift) => {
+    const start = targetStart || fechaInicioImpresion;
+    const end = targetEnd || fechaFinImpresion || start;
+    const isInterval = Boolean(end && end !== start);
+    const s = !isInterval ? (targetShift !== undefined ? targetShift : filtroTurnoImpresion) : 'all';
+    if (!start) return;
+    setLoadingCierreImpresion(true);
+    try {
+      const url = isInterval 
+        ? `http://127.0.0.1:5000/api/informes/cierre?fecha_inicio=${start}&fecha_fin=${end}&turno_id=${s}`
+        : `http://127.0.0.1:5000/api/informes/cierre?fecha=${start}&turno_id=${s}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setCierreDataImpresion(data.data);
+      } else {
+        setCierreDataImpresion(null);
+      }
+    } catch (err) {
+      console.error('Error al cargar datos de informe para impresión:', err);
+      setCierreDataImpresion(null);
+    } finally {
+      setLoadingCierreImpresion(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && activeTab === 'reportes' && subTabReportes === 'impresion') {
+      cargarCierreParaImpresion(fechaInicioImpresion, fechaFinImpresion, filtroTurnoImpresion);
+    }
+  }, [user, activeTab, subTabReportes, fechaInicioImpresion, fechaFinImpresion, filtroTurnoImpresion]);
+
+  const handleImprimirFinancieroReportes = async () => {
+    if (!window.electronAPI) {
+      abrirAlerta('La impresión de tickets requiere la aplicación de escritorio Electron.', 'Aviso');
+      return;
+    }
+    const isIntervalo = Boolean(fechaFinImpresion && fechaFinImpresion !== fechaInicioImpresion);
+    let data = cierreDataImpresion;
+    if (!data) {
+      setLoadingCierreImpresion(true);
+      try {
+        const url = isIntervalo
+          ? `http://127.0.0.1:5000/api/informes/cierre?fecha_inicio=${fechaInicioImpresion}&fecha_fin=${fechaFinImpresion}&turno_id=${filtroTurnoImpresion}`
+          : `http://127.0.0.1:5000/api/informes/cierre?fecha=${fechaInicioImpresion}&turno_id=${filtroTurnoImpresion}`;
+        const resp = await fetch(url);
+        const json = await resp.json();
+        if (resp.ok && json.success) {
+          data = json.data;
+          setCierreDataImpresion(data);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoadingCierreImpresion(false);
+      }
+    }
+    if (!data) {
+      abrirAlerta('No se pudieron obtener los datos para el Resumen Financiero.', 'Error');
+      return;
+    }
+
+    setImprimiendoTipo('financiero');
+    setMensajeImpresion('Imprimiendo Resumen Financiero...');
+
+    const isShiftFilter = (!isIntervalo && filtroTurnoImpresion && filtroTurnoImpresion !== 'all' && filtroTurnoImpresion !== 'todos' && filtroTurnoImpresion !== 'undefined');
+    const selectedShift = isShiftFilter 
+      ? listaTurnos.find(t => String(t.id) === String(filtroTurnoImpresion)) 
+      : null;
+
+    let fondoAperturaReporte = 0;
+    let hasArqueoReporte = false;
+    let cargadoPorReporte = '';
+    let efectivoRealReporte = 0;
+    let diferenciaReporte = 0;
+    let observacionesReporte = '';
+    let turnoNombreReporte = isIntervalo 
+      ? 'Intervalo Completo' 
+      : (isShiftFilter ? `Turno #${filtroTurnoImpresion}` : 'Día Completo (Todos)');
+
+    if (!isIntervalo && isShiftFilter && selectedShift) {
+      fondoAperturaReporte = parseFloat(selectedShift.efectivo_inicial || 0);
+      cargadoPorReporte = selectedShift.usuario_fin || selectedShift.usuario_inicio || '';
+      if (!selectedShift.activo) {
+        hasArqueoReporte = true;
+        efectivoRealReporte = parseFloat(selectedShift.efectivo_final || 0);
+        diferenciaReporte = parseFloat(selectedShift.diferencia || 0);
+        observacionesReporte = selectedShift.observaciones || '';
+      }
+    } else if (!isIntervalo) {
+      fondoAperturaReporte = parseFloat(data.efectivo_inicial_sugerido || 0);
+      cargadoPorReporte = user?.nombre || 'Administrador';
+    }
+
+    try {
+      window.electronAPI.printReport({
+        tipo_reporte: 'financiero',
+        is_intervalo: isIntervalo,
+        fecha_inicio: fechaInicioImpresion,
+        fecha_fin: fechaFinImpresion,
+        fecha: isIntervalo ? `${fechaInicioImpresion} al ${fechaFinImpresion}` : fechaInicioImpresion,
+        turno_nombre: turnoNombreReporte,
+        total_ventas: data.total_ventas,
+        total_efectivo: data.total_efectivo,
+        total_debito: data.total_debito,
+        total_credito: data.total_credito,
+        total_tarjeta: data.total_tarjeta,
+        total_gastos: data.total_gastos,
+        gastos: data.gastos || [],
+        productos_vendidos: data.productos_vendidos || [],
+        envases_vendidos: data.envases_vendidos || { cantidad: 0, total_pesos: 0 },
+        productos_promociones: data.productos_promociones || [],
+        comandas_eliminadas: data.comandas_eliminadas || [],
+        monto_total_eliminado: data.monto_total_eliminado || 0,
+        has_arqueo: hasArqueoReporte,
+        cargado_por: cargadoPorReporte,
+        fondo_apertura: fondoAperturaReporte,
+        efectivo_real: efectivoRealReporte,
+        diferencia: diferenciaReporte,
+        observaciones: observacionesReporte
+      });
+      setMensajeImpresion(`✅ Ticket de Resumen Financiero ${isIntervalo ? 'del intervalo' : ''} enviado a impresión.`);
+      setTimeout(() => setMensajeImpresion(''), 4000);
+    } catch (err) {
+      console.error(err);
+      abrirAlerta('Error al imprimir ticket: ' + err.message, 'Error');
+    } finally {
+      setImprimiendoTipo(null);
+    }
+  };
+
+  const handleImprimirInventarioReportes = async () => {
+    if (!window.electronAPI) {
+      abrirAlerta('La impresión de tickets requiere la aplicación de escritorio Electron.', 'Aviso');
+      return;
+    }
+    const isIntervalo = Boolean(fechaFinImpresion && fechaFinImpresion !== fechaInicioImpresion);
+    let data = cierreDataImpresion;
+    if (!data) {
+      setLoadingCierreImpresion(true);
+      try {
+        const url = isIntervalo
+          ? `http://127.0.0.1:5000/api/informes/cierre?fecha_inicio=${fechaInicioImpresion}&fecha_fin=${fechaFinImpresion}&turno_id=${filtroTurnoImpresion}`
+          : `http://127.0.0.1:5000/api/informes/cierre?fecha=${fechaInicioImpresion}&turno_id=${filtroTurnoImpresion}`;
+        const resp = await fetch(url);
+        const json = await resp.json();
+        if (resp.ok && json.success) {
+          data = json.data;
+          setCierreDataImpresion(data);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoadingCierreImpresion(false);
+      }
+    }
+    if (!data) {
+      abrirAlerta('No se pudieron obtener los datos para el Resumen de Inventario.', 'Error');
+      return;
+    }
+
+    setImprimiendoTipo('inventario');
+    setMensajeImpresion('Imprimiendo Resumen de Inventario...');
+
+    const isShiftFilter = (!isIntervalo && filtroTurnoImpresion && filtroTurnoImpresion !== 'all' && filtroTurnoImpresion !== 'todos' && filtroTurnoImpresion !== 'undefined');
+    const turnoNombreReporte = isIntervalo 
+      ? 'Intervalo Completo' 
+      : (isShiftFilter ? `Turno #${filtroTurnoImpresion}` : 'Día Completo (Todos)');
+
+    let stockActual = listaIngredientes;
+    if (!stockActual || stockActual.length === 0) {
+      try {
+        const resp = await fetch('http://127.0.0.1:5000/api/ingredientes');
+        const dataIng = await resp.json();
+        if (resp.ok && dataIng.success && dataIng.ingredientes) {
+          stockActual = dataIng.ingredientes;
+          setListaIngredientes(dataIng.ingredientes);
+        }
+      } catch (e) {
+        console.error('Error al obtener stock actual:', e);
+      }
+    }
+
+    try {
+      window.electronAPI.printReport({
+        tipo_reporte: 'inventario',
+        is_intervalo: isIntervalo,
+        fecha_inicio: fechaInicioImpresion,
+        fecha_fin: fechaFinImpresion,
+        fecha: isIntervalo ? `${fechaInicioImpresion} al ${fechaFinImpresion}` : fechaInicioImpresion,
+        turno_nombre: turnoNombreReporte,
+        ingredientes_gastados: data.ingredientes_gastados || [],
+        entradas_inventario: data.entradas_inventario || [],
+        mermas_inventario: data.mermas_inventario || [],
+        inventario_actual: stockActual || []
+      });
+      setMensajeImpresion(`✅ Ticket de Resumen de Inventario ${isIntervalo ? 'del intervalo' : ''} enviado a impresión.`);
+      setTimeout(() => setMensajeImpresion(''), 4000);
+    } catch (err) {
+      console.error(err);
+      abrirAlerta('Error al imprimir ticket: ' + err.message, 'Error');
+    } finally {
+      setImprimiendoTipo(null);
+    }
+  };
+
+  const handleImprimirProductosReportes = async () => {
+    if (!window.electronAPI) {
+      abrirAlerta('La impresión de tickets requiere la aplicación de escritorio Electron.', 'Aviso');
+      return;
+    }
+    const isIntervalo = Boolean(fechaFinImpresion && fechaFinImpresion !== fechaInicioImpresion);
+    let data = cierreDataImpresion;
+    if (!data) {
+      setLoadingCierreImpresion(true);
+      try {
+        const url = isIntervalo
+          ? `http://127.0.0.1:5000/api/informes/cierre?fecha_inicio=${fechaInicioImpresion}&fecha_fin=${fechaFinImpresion}&turno_id=${filtroTurnoImpresion}`
+          : `http://127.0.0.1:5000/api/informes/cierre?fecha=${fechaInicioImpresion}&turno_id=${filtroTurnoImpresion}`;
+        const resp = await fetch(url);
+        const json = await resp.json();
+        if (resp.ok && json.success) {
+          data = json.data;
+          setCierreDataImpresion(data);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoadingCierreImpresion(false);
+      }
+    }
+    if (!data) {
+      abrirAlerta('No se pudieron obtener los datos de productos vendidos.', 'Error');
+      return;
+    }
+
+    setImprimiendoTipo('productos');
+    setMensajeImpresion('Imprimiendo Productos por Categoría...');
+
+    const unificadosConCategoria = (data.productos_unificados || []).map(item => {
+      const prod = productos.find(p => p.nombre.toLowerCase().trim() === item.nombre_producto.toLowerCase().trim());
+      const catName = item.categoria || prod?.categoria || (item.nombre_producto === 'Envases para llevar' ? 'Envases' : 'Otros');
+      const catObj = listaCategorias.find(c => c.nombre.toLowerCase().trim() === catName.toLowerCase().trim());
+      return {
+        ...item,
+        categoria: catName,
+        categoria_emoji: item.categoria_emoji || catObj?.emoji || '🏷️',
+        categoria_orden: item.categoria_orden !== undefined ? item.categoria_orden : (catObj?.orden !== undefined ? catObj.orden : 999)
+      };
+    });
+
+    try {
+      window.electronAPI.printReport({
+        fecha: isIntervalo ? `${fechaInicioImpresion} al ${fechaFinImpresion}` : fechaInicioImpresion,
+        fecha_inicio: fechaInicioImpresion,
+        fecha_fin: fechaFinImpresion,
+        is_intervalo: isIntervalo,
+        tipo_reporte: 'consolidado',
+        productos_unificados: unificadosConCategoria,
+        categorias_orden: listaCategorias.map(c => c.nombre)
+      });
+      setMensajeImpresion(`✅ Ticket de Productos por Categoría ${isIntervalo ? 'del intervalo' : ''} enviado a impresión.`);
+      setTimeout(() => setMensajeImpresion(''), 4000);
+    } catch (err) {
+      console.error(err);
+      abrirAlerta('Error al imprimir ticket: ' + err.message, 'Error');
+    } finally {
+      setImprimiendoTipo(null);
+    }
+  };
+
   useEffect(() => {
     if (user && activeTab === 'cierre') {
       setFiltroTurnoCierre('all');
@@ -2645,6 +3561,11 @@ function App() {
   };
 
   const agregarAlPedido = (producto) => {
+    if (!activeShift) {
+      abrirAlerta('La pestaña de pedidos está deshabilitada porque no hay un turno activo. Debes ingresar el monto inicial de apertura para operar.', 'Turno Requerido');
+      setShowShiftPrompt(true);
+      return;
+    }
     setPedido((prev) => {
       const existe = prev.find((item) => item.id === producto.id);
       if (existe) {
@@ -2675,7 +3596,16 @@ function App() {
   };
 
   const handleConfirmarPedido = () => {
+    if (!activeShift) {
+      abrirAlerta('No puedes registrar pedidos porque no hay un turno activo. Debes ingresar el monto inicial de apertura.', 'Turno Requerido');
+      setShowShiftPrompt(true);
+      return;
+    }
     if (pedido.length === 0) return;
+    if (tipoEntrega === 'Pedido Externo') {
+      handleConfirmarPedidoExterno();
+      return;
+    }
     setClienteNombre('');
     setPedidoNota('');
     setTipoTransaccion('Efectivo');
@@ -2683,6 +3613,68 @@ function App() {
     setMontoDebitoMixto('');
     setMontoCreditoMixto('');
     setShowPromptCliente(true);
+  };
+
+  const handleConfirmarPedidoExterno = () => {
+    if (pedido.length === 0) return;
+    setTipoEntrega('Llevar');
+    setClienteNombre('PedidosYa');
+    setPedidoNota('');
+    setTipoTransaccion('Pedido Externo');
+    setMontoEfectivoMixto('');
+    setMontoDebitoMixto('');
+    setMontoCreditoMixto('');
+    setShowPromptCliente(true);
+  };
+
+  const handleImprimirComprobante = () => {
+    if (!pedido || pedido.length === 0) {
+      abrirAlerta('No hay productos en el pedido para imprimir un comprobante.', 'Pedido Vacío');
+      return;
+    }
+
+    const envasesInfo = calcularEnvases(pedido, tipoEntrega);
+    const subtotalProductos = calcularSubtotalProductos(pedido);
+    const totalPedido = subtotalProductos + envasesInfo.montoTotal;
+    const atendidoPor = user ? user.nombre : 'Atención';
+
+    const comprobanteData = {
+      ticket: 'COMPROBANTE',
+      es_comprobante: true,
+      abrir_caja: false,
+      cliente: clienteNombre && clienteNombre.trim() !== '' ? clienteNombre.trim() : 'PRE-CUENTA / COMPROBANTE',
+      fecha_hora: new Date().toISOString(),
+      productos: pedido.map(item => ({
+        id: item.id,
+        nombre: item.nombre,
+        cantidad: item.cantidad,
+        precio: parseFloat(item.precio),
+        promocion_id: item.promocion_id || null,
+        mostrar_nombre_ticket: isOptionEnabled(item.mostrar_nombre_ticket, true),
+        productos_fijos: item.productos_fijos || [],
+        opciones_elegidas: item.opciones_elegidas || []
+      })),
+      total: totalPedido,
+      atendido_por: atendidoPor,
+      nota: pedidoNota && pedidoNota.trim() !== '' ? pedidoNota.trim() : null,
+      tipo_entrega: tipoEntrega,
+      tipo_transaccion: 'Comprobante',
+      cantidad_envases: envasesInfo.cantidadTotal,
+      monto_envases: envasesInfo.montoTotal,
+      local_nombre: localNombre,
+      local_direccion: localDireccion,
+      local_telefono: localTelefono,
+      local_pie_ticket: localPieTicket,
+      impuesto_iva_porcentaje: impuestoIvaPorcentaje,
+      impuesto_incluido: impuestoIncluido
+    };
+
+    if (window.electronAPI && typeof window.electronAPI.printTicket === 'function') {
+      window.electronAPI.printTicket(comprobanteData);
+      abrirAlerta('Se ha enviado el comprobante del pedido actual a la impresora (sin registrar en base de datos ni historial).', 'Comprobante Impreso');
+    } else {
+      abrirAlerta('La impresión de comprobantes solo está disponible desde la versión de escritorio conectada a la impresora.', 'Función de Impresora');
+    }
   };
 
   const handleSubmitPedido = async (e) => {
@@ -2697,8 +3689,14 @@ function App() {
     let montoDeb = 0;
     let montoCred = 0;
     let detalleMixto = null;
+    let finalTotalPedido = totalPedido;
 
-    if (tipoTransaccion === 'Mixto') {
+    if (tipoTransaccion === 'Pedido Externo') {
+      montoEfec = 0;
+      montoDeb = 0;
+      montoCred = 0;
+      finalTotalPedido = 0;
+    } else if (tipoTransaccion === 'Mixto') {
       montoEfec = parseFloat(montoEfectivoMixto) || 0;
       montoDeb = parseFloat(montoDebitoMixto) || 0;
       montoCred = parseFloat(montoCreditoMixto) || 0;
@@ -2728,8 +3726,8 @@ function App() {
     }
 
     const payload = {
-      cliente_nombre: clienteNombre.trim(),
-      total: totalPedido,
+      cliente_nombre: (clienteNombre && clienteNombre.trim() !== '') ? clienteNombre.trim() : (tipoTransaccion === 'Pedido Externo' ? 'PedidosYa' : 'Cliente'),
+      total: finalTotalPedido,
       atendido_por: atendidoPor,
       productos: pedido.map(item => ({
         id: item.id,
@@ -2737,11 +3735,12 @@ function App() {
         cantidad: item.cantidad,
         precio: parseFloat(item.precio),
         promocion_id: item.promocion_id || null,
+        mostrar_nombre_ticket: isOptionEnabled(item.mostrar_nombre_ticket, true),
         productos_fijos: item.productos_fijos || [],
         opciones_elegidas: item.opciones_elegidas || []
       })),
       nota: pedidoNota.trim() || null,
-      tipo_entrega: tipoEntrega,
+      tipo_entrega: tipoEntrega === 'Pedido Externo' ? 'Llevar' : tipoEntrega,
       tipo_transaccion: tipoTransaccion,
       monto_efectivo: montoEfec,
       monto_debito: montoDeb,
@@ -2764,10 +3763,10 @@ function App() {
       if (response.ok && data.success) {
         const newComanda = {
           ticket: data.ticket,
-          cliente: clienteNombre.trim(),
+          cliente: payload.cliente_nombre,
           fecha_hora: data.fecha_hora,
           productos: payload.productos,
-          total: totalPedido,
+          total: payload.total,
           atendido_por: atendidoPor,
           nota: payload.nota,
           tipo_entrega: payload.tipo_entrega,
@@ -2783,7 +3782,8 @@ function App() {
           local_telefono: localTelefono,
           local_pie_ticket: localPieTicket,
           impuesto_iva_porcentaje: impuestoIvaPorcentaje,
-          impuesto_incluido: impuestoIncluido
+          impuesto_incluido: impuestoIncluido,
+          abrir_caja: payload.tipo_transaccion !== 'Pedido Externo'
         };
         setComandaData(newComanda);
 
@@ -3129,6 +4129,33 @@ function App() {
                     <span className={`badge ${user.cargo.toLowerCase() === 'administrador' ? 'badge-admin' : ''}`}>
                       {user.cargo}
                     </span>
+                    {activeShift ? (
+                      <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: '700', marginLeft: '0.5rem' }}>
+                        ● Turno #{activeShift.id}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowShiftPrompt(true)}
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          color: '#f87171',
+                          padding: '0.15rem 0.55rem',
+                          borderRadius: '50px',
+                          fontSize: '0.72rem',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          marginLeft: '0.5rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem'
+                        }}
+                        title="Haz clic para ingresar monto inicial y abrir turno"
+                      >
+                        🔒 Sin Turno (Abrir)
+                      </button>
+                    )}
                   </p>
                 </div>
               </div>
@@ -3136,10 +4163,25 @@ function App() {
               {/* Navegación según el rol del usuario */}
               <div className="nav-tabs">
                 <button 
-                  onClick={() => setActiveTab('pedidos')} 
+                  onClick={() => {
+                    if (!activeShift) {
+                      abrirAlerta('La pestaña de pedidos está deshabilitada porque no hay un turno activo. Para habilitarla y tomar pedidos, debes ingresar el monto inicial de apertura.', 'Turno Requerido');
+                      setShowShiftPrompt(true);
+                      return;
+                    }
+                    setActiveTab('pedidos');
+                  }} 
                   className={`nav-tab ${activeTab === 'pedidos' ? 'active' : ''}`}
+                  style={!activeShift ? { 
+                    opacity: 0.55, 
+                    cursor: 'not-allowed',
+                    borderStyle: 'dashed',
+                    borderColor: 'rgba(239, 68, 68, 0.4)',
+                    color: 'var(--text-muted)'
+                  } : {}}
+                  title={!activeShift ? 'Deshabilitado: Debes ingresar monto inicial para abrir turno' : '🛒 Pedidos y Comandas'}
                 >
-                  🛒 Pedidos
+                  🛒 Pedidos {!activeShift && <span style={{ fontSize: '0.75rem', color: '#ef4444', marginLeft: '0.25rem' }}>🔒</span>}
                 </button>
                 {user.cargo.toLowerCase() === 'administrador' && (
                   <>
@@ -3195,24 +4237,58 @@ function App() {
                 </button>
               </div>
 
-              <div className="header-actions" style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                <button onClick={handleLogout} className="btn-secondary">
-                  Cerrar Sesión
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto', flexShrink: 0 }}>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const presets = ['1366x768', '1280x720', '1920x1080'];
+                    const nextIdx = (presets.indexOf(appResolucion) + 1) % presets.length;
+                    setAppResolucion(presets[nextIdx]);
+                  }} 
+                  className="theme-toggle-header"
+                  title="Cambiar resolución de pantalla"
+                  style={{ whiteSpace: 'nowrap', height: '38px', padding: '0 0.85rem', flexShrink: 0 }}
+                >
+                  📺 {appResolucion === '1366x768' ? '1366x768' : appResolucion === '1280x720' ? '1280x720' : appResolucion === '1920x1080' ? '1920x1080' : appResolucion}
                 </button>
                 <button 
                   type="button"
                   onClick={() => setIsDark(!isDark)} 
                   className="theme-toggle-header"
                   title={isDark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-                  style={{ position: 'absolute', top: '100%', marginTop: '0.4rem', right: 0 }}
+                  style={{ whiteSpace: 'nowrap', height: '38px', padding: '0 0.85rem', flexShrink: 0 }}
                 >
                   {isDark ? '☀️ Claro' : '🌙 Oscuro'}
+                </button>
+                <button onClick={handleLogout} className="btn-secondary" style={{ whiteSpace: 'nowrap', height: '38px', padding: '0 1rem', flexShrink: 0 }}>
+                  Cerrar Sesión
                 </button>
               </div>
             </div>
 
             {/* PESTAÑA DE PEDIDOS (Visible para todos) */}
             {activeTab === 'pedidos' && (
+              !activeShift ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem 1.5rem', minHeight: '400px' }}>
+                  <div className="report-panel" style={{ maxWidth: '480px', width: '100%', textAlign: 'center', padding: '2.5rem 2rem', border: '1.5px dashed rgba(239, 68, 68, 0.45)', borderRadius: '24px', background: 'rgba(239, 68, 68, 0.04)', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
+                    <div style={{ fontSize: '3.5rem', marginBottom: '1rem' }}>🔒</div>
+                    <h3 style={{ fontSize: '1.4rem', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '0.75rem' }}>
+                      Pestaña de Pedidos Deshabilitada
+                    </h3>
+                    <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: '1.5', marginBottom: '1.75rem' }}>
+                      No hay ningún turno de caja abierto actualmente. Para registrar pedidos, cobrar comandas y gestionar ventas en el sistema, debes ingresar el <strong>monto inicial de apertura</strong>.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => setShowShiftPrompt(true)}
+                      style={{ padding: '0.8rem 1.75rem', fontSize: '0.95rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', boxShadow: '0 4px 14px rgba(245, 158, 11, 0.35)', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                    >
+                      🔑 Abrir Turno con Monto Inicial
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <div className="pos-container">
                 {/* Columna Izquierda: Catálogo de Productos */}
                 <div className="catalog-section">
@@ -3258,7 +4334,12 @@ function App() {
                       </button>
 
                       {/* Categorías Dinámicas (Arrastrables) */}
-                      {listaCategorias.map((cat, idx) => {
+                      {listaCategorias
+                        .filter(cat => {
+                          const n = cat.nombre ? cat.nombre.toLowerCase().trim() : '';
+                          return n !== 'todos' && n !== 'promociones' && n !== 'promoción' && n !== 'promocion';
+                        })
+                        .map((cat, idx) => {
                         const nombre = cat.nombre;
                         const emoji = cat.emoji || '📁';
                         const isDragging = draggedCatIndex === idx;
@@ -3436,28 +4517,215 @@ function App() {
 
                 {/* Columna Derecha: Ticket de Pedido */}
                 <div className="order-section">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                    <h3 className="section-title" style={{ margin: 0 }}>📝 Detalle del Pedido</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <h3 className="section-title" style={{ margin: 0, fontSize: '1.25rem' }}>📝 Detalle del Pedido</h3>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        <button
+                          type="button"
+                          onClick={handleImprimirComprobante}
+                          disabled={pedido.length === 0}
+                          style={{
+                            padding: '0.65rem 0.95rem',
+                            fontSize: '0.9rem',
+                            fontWeight: '700',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            background: pedido.length === 0 ? 'rgba(59, 130, 246, 0.12)' : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                            border: '1px solid rgba(37, 99, 235, 0.4)',
+                            color: pedido.length === 0 ? 'var(--text-secondary)' : '#ffffff',
+                            borderRadius: '12px',
+                            cursor: pedido.length === 0 ? 'not-allowed' : 'pointer',
+                            opacity: pedido.length === 0 ? 0.6 : 1,
+                            boxShadow: pedido.length === 0 ? 'none' : '0 4px 12px rgba(37, 99, 235, 0.3)',
+                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                            whiteSpace: 'nowrap'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (pedido.length > 0) {
+                              e.currentTarget.style.transform = 'translateY(-2px)';
+                              e.currentTarget.style.boxShadow = '0 6px 16px rgba(37, 99, 235, 0.45)';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (pedido.length > 0) {
+                              e.currentTarget.style.transform = 'translateY(0)';
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.3)';
+                            }
+                          }}
+                          title="Imprimir comprobante previo del pedido actual sin guardar"
+                        >
+                          <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>🧾</span>
+                          <span>Comprobante</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.electronAPI && typeof window.electronAPI.openCashDrawer === 'function') {
+                              window.electronAPI.openCashDrawer();
+                              abrirAlerta('Se ha enviado la señal de apertura a la caja registradora.', 'Caja Registradora');
+                            } else {
+                              abrirAlerta('La apertura de cajón monedero solo está disponible desde la versión de escritorio conectada a la impresora.', 'Función de Impresora');
+                            }
+                          }}
+                          style={{
+                            padding: '0.65rem 1.05rem',
+                            fontSize: '0.92rem',
+                            fontWeight: '800',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.45rem',
+                            background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
+                            border: 'none',
+                            color: '#ffffff',
+                            borderRadius: '12px',
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 12px rgba(234, 88, 12, 0.35)',
+                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                            whiteSpace: 'nowrap'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = '0 6px 16px rgba(234, 88, 12, 0.45)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(234, 88, 12, 0.35)';
+                          }}
+                          title="Enviar comando para abrir la caja de dinero"
+                        >
+                          <span style={{ fontSize: '1.15rem', lineHeight: 1 }}>🔓</span>
+                          <span>Abrir Caja</span>
+                        </button>
+                      </div>
+                    </div>
                     
-                    {/* Selector Servir / Llevar */}
-                    <div className="delivery-selector-group" style={{ margin: 0, minWidth: '210px' }}>
+                    {/* Selector Servir / Llevar / Pedido Externo */}
+                    <div className="delivery-selector-group" style={{ margin: 0, width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr 1.15fr', gap: '0.35rem' }}>
                       <button
                         type="button"
                         className={`delivery-option-btn ${tipoEntrega === 'Servir' ? 'active' : ''}`}
-                        onClick={() => setTipoEntrega('Servir')}
-                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem', fontWeight: 'bold' }}
+                        onClick={() => {
+                          setTipoEntrega('Servir');
+                          if (tipoTransaccion === 'Pedido Externo') {
+                            setTipoTransaccion('Efectivo');
+                            setClienteNombre('');
+                          }
+                        }}
+                        style={{ 
+                          padding: '0.48rem 0.4rem', 
+                          fontSize: '0.85rem', 
+                          fontWeight: 'bold',
+                          ...(tipoEntrega === 'Servir' ? {
+                            background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                            borderColor: '#047857',
+                            color: '#ffffff',
+                            boxShadow: '0 2px 8px rgba(5, 150, 105, 0.35)'
+                          } : {})
+                        }}
                       >
                         🍽️ Servir
                       </button>
                       <button
                         type="button"
                         className={`delivery-option-btn ${tipoEntrega === 'Llevar' ? 'active' : ''}`}
-                        onClick={() => setTipoEntrega('Llevar')}
-                        style={{ padding: '0.4rem 0.65rem', fontSize: '0.8rem', fontWeight: 'bold' }}
+                        onClick={() => {
+                          setTipoEntrega('Llevar');
+                          if (tipoTransaccion === 'Pedido Externo') {
+                            setTipoTransaccion('Efectivo');
+                            setClienteNombre('');
+                          }
+                        }}
+                        style={{ 
+                          padding: '0.48rem 0.4rem', 
+                          fontSize: '0.88rem', 
+                          fontWeight: '800',
+                          ...(tipoEntrega === 'Llevar' ? {
+                            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                            borderColor: '#b91c1c',
+                            color: '#ffffff',
+                            boxShadow: '0 0 12px rgba(239, 68, 68, 0.55)',
+                            transform: 'scale(1.02)'
+                          } : {})
+                        }}
                       >
-                        🛍️ Llevar
+                        🛍️ ¡LLEVAR!
+                      </button>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoEntrega === 'Pedido Externo' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTipoEntrega('Pedido Externo');
+                          setTipoTransaccion('Pedido Externo');
+                          if (!clienteNombre || clienteNombre === 'Cliente') {
+                            setClienteNombre('PedidosYa');
+                          }
+                        }}
+                        style={{ 
+                          padding: '0.45rem 0.4rem', 
+                          fontSize: '0.83rem', 
+                          fontWeight: 'bold',
+                          whiteSpace: 'nowrap',
+                          ...(tipoEntrega === 'Pedido Externo' ? {
+                            background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)',
+                            borderColor: '#e11d48',
+                            color: '#ffffff',
+                            boxShadow: '0 2px 8px rgba(225, 29, 72, 0.35)'
+                          } : {
+                            border: '1px dashed rgba(244, 63, 94, 0.4)',
+                            color: 'var(--text-secondary)'
+                          })
+                        }}
+                        title="PedidosYa / Delivery App (descuenta inventario, sin registrar dinero en caja)"
+                      >
+                        🛵 Pedido Externo
                       </button>
                     </div>
+
+                    {/* Banner indicador evidente de modalidad de entrega */}
+                    {tipoEntrega === 'Llevar' && (
+                      <div style={{
+                        marginTop: '0.35rem',
+                        padding: '0.4rem 0.6rem',
+                        background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                        color: '#ffffff',
+                        borderRadius: '8px',
+                        fontSize: '0.82rem',
+                        fontWeight: '900',
+                        textAlign: 'center',
+                        letterSpacing: '0.8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.4rem',
+                        boxShadow: '0 2px 8px rgba(220, 38, 38, 0.35)'
+                      }}>
+                        <span>🛍️</span>
+                        <span>PEDIDO PARA LLEVAR (EMPAQUE)</span>
+                      </div>
+                    )}
+                    {tipoEntrega === 'Servir' && (
+                      <div style={{
+                        marginTop: '0.35rem',
+                        padding: '0.32rem 0.6rem',
+                        background: 'rgba(5, 150, 105, 0.12)',
+                        border: '1px solid rgba(5, 150, 105, 0.35)',
+                        color: isDark ? '#a7f3d0' : '#047857',
+                        borderRadius: '8px',
+                        fontSize: '0.78rem',
+                        fontWeight: '700',
+                        textAlign: 'center',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.4rem'
+                      }}>
+                        <span>🍽️</span>
+                        <span>CONSUMO EN LOCAL (SERVIR)</span>
+                      </div>
+                    )}
                   </div>
                   
                   <div className="order-ticket">
@@ -3589,20 +4857,40 @@ function App() {
                                 <div className="total-row">
                                   <span>Total:</span>
                                   <span className="total-amount">
-                                    ${grandTotal.toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                    {tipoEntrega === 'Pedido Externo' ? (
+                                      <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.2 }}>
+                                        <span style={{ fontSize: '0.9rem', color: '#f43f5e', fontWeight: 'bold' }}>🛵 Externo ($0 Caja)</span>
+                                        <span style={{ fontSize: '0.75rem', opacity: 0.65, textDecoration: 'line-through' }}>
+                                          ${grandTotal.toLocaleString('es-CL')}
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      `$${grandTotal.toLocaleString('es-CL', { minimumFractionDigits: 0 })}`
+                                    )}
                                   </span>
                                 </div>
                               </>
                             );
                           })()}
-                          <button onClick={handleConfirmarPedido} className="btn-primary btn-checkout">
-                            Confirmar Pedido
+                          <button 
+                            onClick={handleConfirmarPedido} 
+                            className="btn-primary btn-checkout"
+                            style={tipoEntrega === 'Pedido Externo' ? {
+                              background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)',
+                              borderColor: '#e11d48',
+                              boxShadow: '0 4px 14px rgba(225, 29, 72, 0.35)'
+                            } : {}}
+                          >
+                            {tipoEntrega === 'Pedido Externo' ? '🛵 Confirmar Pedido Externo' : 'Confirmar Pedido'}
                           </button>
+
                           <button
                             onClick={() => {
                               setPedido([]);
                               setEnvasesCantidadOverride(null);
                               setPrecioEnvaseOverride(null);
+                              setTipoEntrega('Servir');
+                              setTipoTransaccion('Efectivo');
                             }}
                             className="btn-secondary btn-clear-order"
                           >
@@ -3614,7 +4902,8 @@ function App() {
                   </div>
                 </div>
               </div>
-            )}
+            )
+          )}
 
             {/* PESTAÑA DE ADMINISTRACIÓN (Solo Admin) */}
             {activeTab === 'usuarios' && user.cargo.toLowerCase() === 'administrador' && (
@@ -3819,6 +5108,57 @@ function App() {
                             </div>
                           )}
 
+                          {/* Asignación Rápida del Envase para Llevar a esta Categoría */}
+                          {(() => {
+                            const envaseAsignadoEstaCat = productos.some(p =>
+                              (p.id === 108 || p.nombre?.toLowerCase().includes('envase para llevar')) &&
+                              p.categoria?.toLowerCase() === selectedCatForProducts.nombre?.toLowerCase()
+                            );
+                            const envaseProd = productos.find(p => p.id === 108 || p.nombre?.toLowerCase().includes('envase para llevar'));
+                            const catActualEnvase = envaseProd?.categoria || 'Otros';
+
+                            return (
+                              <div style={{
+                                marginBottom: '1rem',
+                                padding: '0.75rem 1rem',
+                                borderRadius: '14px',
+                                background: envaseAsignadoEstaCat ? 'rgba(16, 185, 129, 0.08)' : 'rgba(234, 88, 12, 0.08)',
+                                border: envaseAsignadoEstaCat ? '1.5px solid rgba(16, 185, 129, 0.35)' : '1px dashed var(--accent-primary)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                flexWrap: 'wrap'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                                  <span style={{ fontSize: '1.4rem' }}>📦</span>
+                                  <div>
+                                    <div style={{ fontWeight: '700', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                                      Producto "Envase para llevar" ({precioEnvase ? `$${precioEnvase}` : '$300'})
+                                    </div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                      {envaseAsignadoEstaCat
+                                        ? '✅ Asignado actualmente a esta categoría (se muestra en su sección del menú)'
+                                        : `⚪ Actualmente ubicado en: "${catActualEnvase}"`}
+                                    </div>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleEnvaseEnCategoria(selectedCatForProducts.nombre, !envaseAsignadoEstaCat)}
+                                  className={envaseAsignadoEstaCat ? 'btn-secondary' : 'btn-primary'}
+                                  style={{
+                                    fontSize: '0.8rem',
+                                    padding: '0.45rem 0.9rem',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  {envaseAsignadoEstaCat ? 'Quitar de esta Categoría' : '🛍️ Asignar a esta Categoría'}
+                                </button>
+                              </div>
+                            );
+                          })()}
+
                           <button 
                             type="button" 
                             className="btn-primary" 
@@ -3881,17 +5221,17 @@ function App() {
                           </div>
 
                           <div className="users-list-container" style={{ flex: 1, overflowY: 'auto' }}>
-                            {productos.filter(p => p.categoria === selectedCatForProducts.nombre).length === 0 ? (
+                            {productos.filter(p => p.categoria?.toLowerCase() === selectedCatForProducts.nombre?.toLowerCase()).length === 0 ? (
                               <p className="empty-catalog" style={{ textAlign: 'center', marginTop: '2rem' }}>
                                 No hay productos en esta categoría.
                               </p>
-                            ) : productos.filter(p => p.categoria === selectedCatForProducts.nombre && p.nombre.toLowerCase().includes(busquedaProductoEnCat.toLowerCase())).length === 0 ? (
+                            ) : productos.filter(p => p.categoria?.toLowerCase() === selectedCatForProducts.nombre?.toLowerCase() && p.nombre.toLowerCase().includes(busquedaProductoEnCat.toLowerCase())).length === 0 ? (
                               <p className="empty-catalog" style={{ textAlign: 'center', marginTop: '2rem', fontStyle: 'italic' }}>
                                 No se encontraron productos que coincidan con la búsqueda.
                               </p>
                             ) : (
                               productos
-                                .filter(p => p.categoria === selectedCatForProducts.nombre && p.nombre.toLowerCase().includes(busquedaProductoEnCat.toLowerCase()))
+                                .filter(p => p.categoria?.toLowerCase() === selectedCatForProducts.nombre?.toLowerCase() && p.nombre.toLowerCase().includes(busquedaProductoEnCat.toLowerCase()))
                                 .map(p => (
                                   <div key={p.id} className="user-list-item" style={{ background: 'var(--item-bg)', border: '1px solid var(--glass-border)', padding: '0.75rem 1rem' }}>
                                     <div className="user-list-info" style={{ flexGrow: 1 }}>
@@ -4038,6 +5378,10 @@ function App() {
                                   <option value="🍕">🍕 Pizza</option>
                                   <option value="🌮">🌮 Taco</option>
                                   <option value="🌭">🌭 Hot Dog / Completo</option>
+                                  <option value="🍅">🍅 Tomate</option>
+                                  <option value="🥑">🥑 Palta</option>
+                                  <option value="🌶️">🌶️ Ají</option>
+                                  <option value="🥩">🥩 Carne</option>
                                   <option value="🍦">🍦 Helado</option>
                                   <option value="🍗">🍗 Pollo Frito</option>
                                   <option value="☕">☕ Café</option>
@@ -4248,6 +5592,21 @@ function App() {
                           </label>
                         </div>
 
+                        <div className="form-group" style={{ marginTop: '0.75rem', background: 'rgba(234, 88, 12, 0.08)', padding: '0.65rem 0.85rem', borderRadius: '10px', border: '1px dashed var(--accent-primary)' }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-primary)', fontWeight: '700' }}>
+                            <input
+                              type="checkbox"
+                              checked={nuevaCatAsignarEnvase}
+                              onChange={(e) => setNuevaCatAsignarEnvase(e.target.checked)}
+                              style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: 'var(--accent-primary)' }}
+                            />
+                            <span>🛍️ Asignar el producto "Envase para llevar" a esta categoría</span>
+                          </label>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginLeft: '1.75rem', marginTop: '0.25rem', lineHeight: '1.3' }}>
+                            Al marcarlo, el producto <strong>Envase para llevar (${precioEnvase ? `$${precioEnvase}` : ''})</strong> se ubicará en esta categoría para aparecer en su sección del menú y catálogo.
+                          </span>
+                        </div>
+
                         <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
                           {editandoCatId ? (
                             <>
@@ -4414,17 +5773,7 @@ function App() {
                       <button
                         type="button"
                         className="btn-primary"
-                        onClick={() => {
-                          setPromoNombre('');
-                          setPromoPrecio('');
-                          setPromoEmoji('🎁');
-                          setPromoActivo(true);
-                          setPromoPasos([]);
-                          setEditandoPromoId(null);
-                          setPromoError('');
-                          setPromoSuccess('');
-                          setPromocionesView('create');
-                        }}
+                        onClick={iniciarNuevaPromo}
                         style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center' }}
                       >
                         ➕ Crear Nueva Promoción
@@ -4443,6 +5792,10 @@ function App() {
                             setPromoNombre('');
                             setPromoPrecio('');
                             setPromoEmoji('🎁');
+                            setPromoAplicaEnvase('no');
+                            setPromoCantidadEnvases(1);
+                            setPromoToparPrecioIndividual(false);
+                            setPromoMostrarNombreTicket(true);
                             setPromoProductosFijos([]);
                             setPromoPasos([]);
                             setEditandoPromoId(null);
@@ -4502,6 +5855,10 @@ function App() {
                                 <option value="🔥">🔥 Destacado</option>
                                 <option value="🍔">🍔 Hamburguesa</option>
                                 <option value="🌭">🌭 Completo</option>
+                                <option value="🍅">🍅 Tomate</option>
+                                <option value="🥑">🥑 Palta</option>
+                                <option value="🌶️">🌶️ Ají</option>
+                                <option value="🥩">🥩 Carne</option>
                                 <option value="🍟">🍟 Papas Fritas</option>
                                 <option value="🥤">🥤 Bebida / Coca-Cola</option>
                                 <option value="🍾">🍾 Botella de Gaseosa</option>
@@ -4671,7 +6028,7 @@ function App() {
                                       <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none', color: 'var(--text-secondary)' }}>
                                         <input 
                                           type="checkbox" 
-                                          checked={paso.autocalcular !== false} 
+                                          checked={paso.autocalcular === true || paso.autocalcular === 1 || paso.autocalcular === 'true'} 
                                           onChange={(e) => toggleAutocalcularPasoForm(idKey, isReal, e.target.checked)} 
                                         />
                                         ⚡ Autocalcular
@@ -4713,6 +6070,33 @@ function App() {
                                         </div>
                                       </div>
 
+                                      {(paso.autocalcular === false || paso.autocalcular === 0 || paso.autocalcular === 'false') && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.03)', padding: '0.35rem 0.6rem', borderRadius: '6px', fontSize: '0.78rem', margin: '0.2rem 0', border: '1px dashed rgba(255,255,255,0.1)' }}>
+                                          <span style={{ color: '#a78bfa', fontWeight: '600' }}>💲 Precio Base Manual:</span>
+                                          <input 
+                                            type="number" 
+                                            className="form-input" 
+                                            placeholder="Ej. 1500" 
+                                            id={`base-manual-${idKey}`}
+                                            defaultValue={paso.precio_base_manual || ''}
+                                            style={{ width: '85px', height: '26px', fontSize: '0.75rem', textAlign: 'center', padding: '0 0.3rem' }}
+                                          />
+                                          <button 
+                                            type="button" 
+                                            className="btn-secondary" 
+                                            style={{ height: '26px', fontSize: '0.72rem', padding: '0 0.5rem', whiteSpace: 'nowrap' }}
+                                            onClick={() => {
+                                              const inp = document.getElementById(`base-manual-${idKey}`);
+                                              if (inp && inp.value !== '') {
+                                                aplicarBaseManualPasoForm(idKey, isReal, inp.value);
+                                              }
+                                            }}
+                                          >
+                                            🎯 Aplicar a Opciones
+                                          </button>
+                                        </div>
+                                      )}
+
                                       {paso.opciones.length === 0 ? (
                                         <p style={{ fontSize: '0.8rem', fontStyle: 'italic', color: 'var(--text-muted)', margin: '0.25rem 0' }}>No hay opciones agregadas aún.</p>
                                       ) : (
@@ -4720,12 +6104,12 @@ function App() {
                                           {paso.opciones.map(opc => (
                                             <div key={opc.producto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(255,255,255,0.05)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.8rem', border: '1px solid rgba(255,255,255,0.05)' }}>
                                               <span>{opc.nombre_producto}</span>
-                                              {paso.autocalcular !== false ? (
+                                              {(paso.autocalcular === true || paso.autocalcular === 1 || paso.autocalcular === 'true') ? (
                                                 parseFloat(opc.precio_adicional) > 0 && (
                                                   <span style={{ color: '#a78bfa', fontSize: '0.75rem', fontWeight: '600' }}>(+${parseFloat(opc.precio_adicional)})</span>
                                                 )
                                               ) : (
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.1rem', marginLeft: '0.25rem' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.25rem' }}>
                                                   <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>+$</span>
                                                   <input 
                                                     type="number" 
@@ -4743,6 +6127,23 @@ function App() {
                                                     value={opc.precio_adicional}
                                                     onChange={(e) => actualizarPrecioAdicionalOpcionForm(idKey, isReal, opc.producto_id, e.target.value)}
                                                   />
+                                                  <button 
+                                                    type="button"
+                                                    title="Fijar sin recargo adicional ($0 extra)"
+                                                    style={{ 
+                                                      border: 'none', 
+                                                      background: parseFloat(opc.precio_adicional) === 0 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255,255,255,0.08)', 
+                                                      color: parseFloat(opc.precio_adicional) === 0 ? '#10b981' : 'var(--text-secondary)', 
+                                                      cursor: 'pointer', 
+                                                      padding: '0.1rem 0.3rem', 
+                                                      borderRadius: '3px', 
+                                                      fontSize: '0.7rem', 
+                                                      fontWeight: 'bold' 
+                                                    }}
+                                                    onClick={() => fijarSinExtraOpcionForm(idKey, isReal, opc.producto_id)}
+                                                  >
+                                                    =$0
+                                                  </button>
                                                 </div>
                                               )}
                                               <button type="button" onClick={() => eliminarOpcionDelPasoForm(idKey, isReal, opc.producto_id)} style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', padding: 0, fontSize: '0.95rem', marginLeft: '0.15rem' }}>&times;</button>
@@ -4767,7 +6168,7 @@ function App() {
                                           type="number" 
                                           className="form-input" 
                                           placeholder="Extra $" 
-                                          disabled={paso.autocalcular !== false}
+                                          disabled={paso.autocalcular === true || paso.autocalcular === 1 || paso.autocalcular === 'true'}
                                           style={{ height: '38px', fontSize: '0.85rem', textAlign: 'center', width: '100%' }} 
                                           id={`extra-price-${idKey}`} 
                                         />
@@ -4822,6 +6223,44 @@ function App() {
                               </div>
                             )}
                           </div>
+                        </div>
+
+                        {/* Protección / Techo de Precio Individual */}
+                        <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.85rem', borderRadius: '12px', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                            <input
+                              type="checkbox"
+                              id="promoToparPrecioCheck"
+                              checked={promoToparPrecioIndividual}
+                              onChange={(e) => setPromoToparPrecioIndividual(e.target.checked)}
+                              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                            />
+                            <label htmlFor="promoToparPrecioCheck" style={{ fontSize: '0.88rem', fontWeight: '700', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                              🛡️ Proteger precio (No cobrar más que compra individual)
+                            </label>
+                          </div>
+                          <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', paddingLeft: '1.8rem' }}>
+                            Si se activa: Si la suma de productos elegidos cuesta menos por separado (ej. Vienesa sola), se cobrará el valor menor. Si se desactiva (ej. Promo 2 Churrascos), se cobrará el precio fijo de la promoción.
+                          </p>
+                        </div>
+
+                        {/* Configuración de Nombre en Ticket */}
+                        <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.85rem', borderRadius: '12px', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                            <input
+                              type="checkbox"
+                              id="promoMostrarNombreTicketCheck"
+                              checked={promoMostrarNombreTicket}
+                              onChange={(e) => setPromoMostrarNombreTicket(e.target.checked)}
+                              style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                            />
+                            <label htmlFor="promoMostrarNombreTicketCheck" style={{ fontSize: '0.88rem', fontWeight: '700', color: 'var(--text-primary)', cursor: 'pointer' }}>
+                              🧾 Mostrar nombre de la promoción en el ticket
+                            </label>
+                          </div>
+                          <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', paddingLeft: '1.8rem' }}>
+                            Si está desmarcado: En el ticket se omitirá el título de la promoción y solo se detallarán los productos contenidos con el precio de la oferta (ej. 1x Luco, 1x Italiano - $6.900).
+                          </p>
                         </div>
 
                         <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -5154,7 +6593,7 @@ function App() {
                         if (filtroTicketId && !ped.id.toString().includes(filtroTicketId.trim())) {
                           return false;
                         }
-                        if (filtroCliente && !ped.cliente_nombre.toLowerCase().includes(filtroCliente.toLowerCase().trim())) {
+                        if (filtroCliente && !(ped.cliente_nombre || '').toLowerCase().includes(filtroCliente.toLowerCase().trim())) {
                           return false;
                         }
                         if (filtroTurnoHistorial !== 'all' && String(ped.turno_id) !== String(filtroTurnoHistorial)) {
@@ -5220,13 +6659,16 @@ function App() {
                                   Ticket #{ped.id}
                                 </span>
                                 <span className="badge" style={{
-                                  background: ped.tipo_entrega === 'Llevar' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                                  border: ped.tipo_entrega === 'Llevar' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)',
-                                  color: ped.tipo_entrega === 'Llevar' ? (isDark ? '#fca5a5' : '#dc2626') : (isDark ? '#a7f3d0' : '#047857'),
-                                  fontSize: '0.75rem',
-                                  padding: '0.15rem 0.5rem'
+                                  background: ped.tipo_entrega === 'Llevar' ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)' : 'rgba(16, 185, 129, 0.15)',
+                                  border: ped.tipo_entrega === 'Llevar' ? '1px solid #b91c1c' : '1px solid rgba(16, 185, 129, 0.3)',
+                                  color: ped.tipo_entrega === 'Llevar' ? '#ffffff' : (isDark ? '#a7f3d0' : '#047857'),
+                                  fontSize: '0.78rem',
+                                  fontWeight: '800',
+                                  padding: '0.2rem 0.55rem',
+                                  borderRadius: '6px',
+                                  boxShadow: ped.tipo_entrega === 'Llevar' ? '0 2px 6px rgba(220, 38, 38, 0.3)' : 'none'
                                 }}>
-                                  {ped.tipo_entrega === 'Llevar' ? 'Llevar' : 'Servir'}
+                                  {ped.tipo_entrega === 'Llevar' ? '🛍️ LLEVAR' : '🍽️ Servir'}
                                 </span>
                                 <span className="badge" style={{
                                   background: ped.tipo_transaccion === 'Crédito' 
@@ -5253,7 +6695,11 @@ function App() {
                                   fontSize: '0.75rem',
                                   padding: '0.15rem 0.5rem'
                                 }}>
-                                  {ped.tipo_transaccion === 'Mixto' ? `🔀 Mixto ${ped.pago_mixto_detalle ? `(${ped.pago_mixto_detalle})` : ''}` : (ped.tipo_transaccion || 'Efectivo')}
+                                  {ped.tipo_transaccion === 'Pedido Externo'
+                                    ? '🛵 Pedido Externo'
+                                    : ped.tipo_transaccion === 'Mixto' 
+                                      ? `🔀 Mixto ${ped.pago_mixto_detalle ? `(${ped.pago_mixto_detalle})` : ''}` 
+                                      : (ped.tipo_transaccion || 'Efectivo')}
                                 </span>
                                 <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: '600' }}>
                                   - {ped.cliente_nombre}
@@ -5268,14 +6714,16 @@ function App() {
                                   border: '1px solid var(--glass-border)',
                                   marginLeft: '0.25rem'
                                 }}>
-                                  ${parseFloat(ped.total).toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                                  {ped.tipo_transaccion === 'Pedido Externo'
+                                    ? '🛵 Externo ($0)'
+                                    : `$${parseFloat(ped.total).toLocaleString('es-CL', { minimumFractionDigits: 0 })}`}
                                 </span>
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                 <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                  {new Date(ped.fecha_hora).toLocaleDateString('es-CL')} - {new Date(ped.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                                  {formatFechaHoraChile(ped.fecha_hora)}
                                 </span>
-                                {subTabHistorial === 'activas' && user?.cargo?.toLowerCase() === 'administrador' && (
+                                {subTabHistorial === 'activas' && (
                                    <button
                                      type="button"
                                      className="btn-danger"
@@ -5353,53 +6801,6 @@ function App() {
                     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                         <h4 style={{ fontSize: '1.1rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>📅 Cierre Diario</h4>
-                        {cierreData && window.electronAPI && (
-                          <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', height: '32px' }}
-                              onClick={() => {
-                                window.electronAPI.printReport({
-                                  fecha: fechaCierre,
-                                  total_ventas: cierreData.total_ventas,
-                                  total_efectivo: cierreData.total_efectivo,
-                                  total_debito: cierreData.total_debito,
-                                  total_credito: cierreData.total_credito,
-                                  total_tarjeta: cierreData.total_tarjeta,
-                                  productos_vendidos: cierreData.productos_vendidos,
-                                  envases_vendidos: cierreData.envases_vendidos,
-                                  productos_promociones: cierreData.productos_promociones,
-                                  ingredientes_gastados: cierreData.ingredientes_gastados,
-                                  has_arqueo: !!cierreRegistradoData,
-                                  cargado_por: cierreRegistradoData ? cierreRegistradoData.cargado_por : '',
-                                  fondo_apertura: cierreRegistradoData ? cierreRegistradoData.fondo_apertura : 0,
-                                  efectivo_real: cierreRegistradoData ? cierreRegistradoData.efectivo_real : 0,
-                                  diferencia: cierreRegistradoData ? cierreRegistradoData.diferencia : 0,
-                                  observaciones: cierreRegistradoData ? cierreRegistradoData.observaciones : '',
-                                  inventario_actual: listaIngredientes
-                                });
-                              }}
-                            >
-                              🖨️ Reporte de Cierre
-                            </button>
-
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              style={{ padding: '0.4rem 0.85rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.4rem', height: '32px' }}
-                              onClick={() => {
-                                window.electronAPI.printReport({
-                                  fecha: fechaCierre,
-                                  tipo_reporte: 'consolidado',
-                                  productos_unificados: cierreData.productos_unificados
-                                });
-                              }}
-                            >
-                              📦 Reporte de Productos
-                            </button>
-                          </div>
-                        )}
                       </div>
                       
                       <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.25rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -5450,7 +6851,8 @@ function App() {
                                   dateFinStr = `${yFin}-${mFin}-${dFin}`;
                                 }
                                 
-                                return dateIniStr === fechaCierre || dateFinStr === fechaCierre;
+                                const todayStr = new Date().toISOString().split('T')[0];
+                                return dateIniStr === fechaCierre || dateFinStr === fechaCierre || (Boolean(t.activo) && fechaCierre === todayStr);
                               })
                               .map(t => (
                                 <option key={t.id} value={t.id}>
@@ -5501,9 +6903,15 @@ function App() {
 
                           <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1rem', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                              <span>💵 Total Efectivo:</span>
-                              <strong>${cierreData.total_efectivo.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                              <span>💵 Total Efectivo Ventas:</span>
+                              <strong style={{ color: 'var(--success)' }}>+${cierreData.total_efectivo.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
                             </div>
+                            {(cierreData.total_gastos > 0) && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#ef4444' }}>
+                                <span>💸 Total Gastos en Efectivo (-):</span>
+                                <strong>-${(cierreData.total_gastos || 0).toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
+                              </div>
+                            )}
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
                               <span>💳 Total Débito:</span>
                               <strong>${cierreData.total_debito.toLocaleString('es-CL', { minimumFractionDigits: 0 })}</strong>
@@ -5518,27 +6926,131 @@ function App() {
                             </div>
                           </div>
 
+                          {/* MÓDULO DE GASTOS EN EFECTIVO */}
+                          <div className="cierre-sub-card" style={{ border: '1px solid rgba(239, 68, 68, 0.25)', background: 'rgba(239, 68, 68, 0.03)' }}>
+                            <h5 className="cierre-sub-card-title" style={{ color: '#ef4444', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span>💸 Registro de Gastos en Efectivo</span>
+                              {cierreData.total_gastos > 0 && (
+                                <span style={{ fontSize: '0.85rem', fontWeight: 'bold', background: 'rgba(239, 68, 68, 0.15)', padding: '0.2rem 0.5rem', borderRadius: '6px' }}>
+                                  Total: -${(cierreData.total_gastos || 0).toLocaleString('es-CL')}
+                                </span>
+                              )}
+                            </h5>
+
+                            {/* Formulario para agregar gasto */}
+                            <form onSubmit={handleAgregarGasto} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="Descripción (ej. Compra hielo)"
+                                value={nuevoGastoDesc}
+                                onChange={(e) => setNuevoGastoDesc(e.target.value)}
+                                style={{ flex: '2', minWidth: '150px', height: '36px', fontSize: '0.85rem' }}
+                              />
+                              <input
+                                type="number"
+                                className="form-input"
+                                placeholder="Monto ($)"
+                                value={nuevoGastoMonto}
+                                onChange={(e) => setNuevoGastoMonto(e.target.value)}
+                                style={{ flex: '1', minWidth: '100px', height: '36px', fontSize: '0.85rem' }}
+                              />
+                              <button
+                                type="submit"
+                                className="btn-primary"
+                                disabled={guardandoGasto}
+                                style={{ height: '36px', padding: '0 0.85rem', fontSize: '0.82rem', whiteSpace: 'nowrap', background: '#ef4444', borderColor: '#dc2626' }}
+                              >
+                                {guardandoGasto ? 'Guardando...' : '➕ Registrar Gasto'}
+                              </button>
+                            </form>
+
+                            {/* Listado de Gastos */}
+                            {cierreData.gastos && cierreData.gastos.length > 0 ? (
+                              <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '180px', overflowY: 'auto' }}>
+                                {cierreData.gastos.map((g) => (
+                                  <div key={g.id} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255, 255, 255, 0.02)', padding: '0.4rem 0.6rem', borderRadius: '8px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                                      <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-primary)' }}>{g.descripcion}</span>
+                                      <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>Por: {g.registrado_por}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                      <strong style={{ color: '#ef4444', fontSize: '0.9rem' }}>
+                                        -${(g.monto || 0).toLocaleString('es-CL')}
+                                      </strong>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEliminarGasto(g.id, g.descripcion)}
+                                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', opacity: 0.8 }}
+                                        title="Eliminar gasto"
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="cierre-empty-text" style={{ fontSize: '0.82rem', margin: 0 }}>No hay gastos en efectivo registrados para esta fecha/turno.</p>
+                            )}
+                          </div>
+
                           {/* Desglose de Ventas y Consumo de Materia Prima (Junto al informe de ventas) */}
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                             {/* LISTA UNIFICADA DE PRODUCTOS VENDIDOS (Unidades Totales) */}
                             <div className="cierre-sub-card">
                               <h5 className="cierre-sub-card-title">🍔 Total de Productos Vendidos (Unidades)</h5>
                               {cierreData.productos_unificados && cierreData.productos_unificados.length > 0 ? (
-                                <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                  {cierreData.productos_unificados.map((p, idx) => (
-                                    <div key={idx} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <span className="cierre-item-name" style={{ flex: 1 }}>{p.nombre_producto}</span>
-                                      {p.cantidad_directa > 0 && p.cantidad_promo > 0 && (
-                                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginRight: '0.75rem' }}>
-                                          ({p.cantidad_directa} indiv. + {p.cantidad_promo} promo)
-                                        </span>
-                                      )}
-                                      <strong className="cierre-item-qty" style={{ color: 'var(--accent-primary)', fontSize: '0.95rem' }}>
-                                        {p.cantidad_total} un.
-                                      </strong>
-                                    </div>
-                                  ))}
-                                  <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '2px dashed var(--accent-primary)', paddingTop: '0.65rem', marginTop: '0.5rem', background: 'rgba(255, 255, 255, 0.06)', fontWeight: 'bold' }}>
+                                <div className="cierre-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                                  {(() => {
+                                    const groups = {};
+                                    cierreData.productos_unificados.forEach(p => {
+                                      const prod = productos.find(x => x.nombre.toLowerCase().trim() === p.nombre_producto.toLowerCase().trim());
+                                      const cat = p.categoria || prod?.categoria || (p.nombre_producto === 'Envases para llevar' ? 'Envases' : 'Otros');
+                                      if (!groups[cat]) groups[cat] = [];
+                                      groups[cat].push({ ...p, categoria: cat });
+                                    });
+
+                                    const sortedCatNames = Object.keys(groups).sort((a, b) => {
+                                      const idxA = listaCategorias.findIndex(c => c.nombre.toLowerCase().trim() === a.toLowerCase().trim());
+                                      const idxB = listaCategorias.findIndex(c => c.nombre.toLowerCase().trim() === b.toLowerCase().trim());
+                                      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                                      if (idxA !== -1) return -1;
+                                      if (idxB !== -1) return 1;
+                                      return a.localeCompare(b);
+                                    });
+
+                                    return sortedCatNames.map((catName, cIdx) => {
+                                      const catObj = listaCategorias.find(c => c.nombre.toLowerCase().trim() === catName.toLowerCase().trim());
+                                      const catTotal = groups[catName].reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0);
+                                      return (
+                                        <div key={cIdx} style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', background: 'rgba(255, 255, 255, 0.02)', padding: '0.55rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dashed rgba(255, 255, 255, 0.1)', paddingBottom: '0.3rem', marginBottom: '0.2rem' }}>
+                                            <span style={{ fontWeight: '700', fontSize: '0.85rem', color: 'var(--accent-primary)', textTransform: 'uppercase' }}>
+                                              {catObj?.emoji || '🏷️'} {catName}
+                                            </span>
+                                            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                                              {catTotal} un.
+                                            </span>
+                                          </div>
+                                          {groups[catName].map((p, idx) => (
+                                            <div key={idx} className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.2rem 0' }}>
+                                              <span className="cierre-item-name" style={{ flex: 1, fontSize: '0.88rem' }}>{p.nombre_producto}</span>
+                                              {p.cantidad_directa > 0 && p.cantidad_promo > 0 && (
+                                                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginRight: '0.75rem' }}>
+                                                  ({p.cantidad_directa} indiv. + {p.cantidad_promo} promo)
+                                                </span>
+                                              )}
+                                              <strong className="cierre-item-qty" style={{ color: 'var(--accent-primary)', fontSize: '0.9rem' }}>
+                                                {p.cantidad_total} un.
+                                              </strong>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      );
+                                    });
+                                  })()}
+                                  <div className="cierre-list-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '2px dashed var(--accent-primary)', paddingTop: '0.65rem', marginTop: '0.3rem', background: 'rgba(255, 255, 255, 0.06)', fontWeight: 'bold' }}>
                                     <span className="cierre-item-name" style={{ fontWeight: '700' }}>Total Unidades Producidas / Vendidas:</span>
                                     <strong style={{ color: 'var(--accent-primary)', fontSize: '0.98rem' }}>
                                       {cierreData.productos_unificados.reduce((acc, curr) => acc + (curr.cantidad_total || 0), 0)} un.
@@ -5609,6 +7121,48 @@ function App() {
                                 <p className="cierre-empty-text">No hay consumo de materia prima registrado hoy.</p>
                               )}
                             </div>
+
+                            {/* Llegada de Mercadería (Entradas de Inventario) */}
+                            <div className="cierre-sub-card">
+                              <h5 className="cierre-sub-card-title" style={{ color: 'var(--success, #10b981)' }}>
+                                📥 Llegada de Mercadería (Entradas)
+                              </h5>
+                              {cierreData.entradas_inventario && cierreData.entradas_inventario.length > 0 ? (
+                                <div className="cierre-list">
+                                  {cierreData.entradas_inventario.map((item, idx) => (
+                                    <div key={idx} className="cierre-list-item">
+                                      <span className="cierre-item-name">{item.ingrediente_nombre}</span>
+                                      <strong className="cierre-item-qty" style={{ color: 'var(--success, #10b981)' }}>
+                                        +{parseFloat(item.cantidad_total).toLocaleString('es-CL', { maximumFractionDigits: 2 })} {item.unidad || ''}
+                                      </strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="cierre-empty-text">No hay entradas de mercadería registradas para esta fecha/turno.</p>
+                              )}
+                            </div>
+
+                            {/* Registro de Mermas / Consumo Interno */}
+                            <div className="cierre-sub-card">
+                              <h5 className="cierre-sub-card-title" style={{ color: '#ef4444' }}>
+                                ⚠️ Registro de Mermas y Desperdicios
+                              </h5>
+                              {cierreData.mermas_inventario && cierreData.mermas_inventario.length > 0 ? (
+                                <div className="cierre-list">
+                                  {cierreData.mermas_inventario.map((item, idx) => (
+                                    <div key={idx} className="cierre-list-item">
+                                      <span className="cierre-item-name">{item.ingrediente_nombre}</span>
+                                      <strong className="cierre-item-qty" style={{ color: '#ef4444' }}>
+                                        -{parseFloat(item.cantidad_total).toLocaleString('es-CL', { maximumFractionDigits: 2 })} {item.unidad || ''}
+                                      </strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="cierre-empty-text">No hay mermas registradas para esta fecha/turno.</p>
+                              )}
+                            </div>
                           </div>
 
 
@@ -5647,7 +7201,7 @@ function App() {
                                 <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>● Turno Activo #{activeShift.id}</span>
                                 <div style={{ marginTop: '0.2rem', color: 'var(--text-secondary)' }}>
                                   Iniciado por: <strong>{activeShift.usuario_inicio}</strong><br />
-                                  Desde: {new Date(activeShift.fecha_hora_inicio).toLocaleDateString('es-CL')} - {new Date(activeShift.fecha_hora_inicio).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                                  Desde: {formatFechaHoraChile(activeShift.fecha_hora_inicio)}
                                 </div>
                               </>
                             ) : (
@@ -5735,7 +7289,7 @@ function App() {
                                     <div>
                                       🔑 <strong>Inicio:</strong> {t.usuario_inicio}<br />
                                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        {new Date(t.fecha_hora_inicio).toLocaleDateString('es-CL')} - {new Date(t.fecha_hora_inicio).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                                        {formatFechaHoraChile(t.fecha_hora_inicio)}
                                       </span><br />
                                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                                         💵 Inicial: <strong>${(t.efectivo_inicial || 0).toLocaleString('es-CL')}</strong>
@@ -5744,7 +7298,7 @@ function App() {
                                     <div>
                                       🔒 <strong>Cierre:</strong> {t.usuario_fin || (t.activo ? '—' : 'Auto')}<br />
                                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        {t.fecha_hora_fin ? `${new Date(t.fecha_hora_fin).toLocaleDateString('es-CL')} - ${new Date(t.fecha_hora_fin).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}` : 'En curso'}
+                                        {t.fecha_hora_fin ? formatFechaHoraChile(t.fecha_hora_fin) : 'En curso'}
                                       </span><br />
                                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                                         💵 Final: <strong>{t.activo ? '—' : `$${(t.efectivo_final || 0).toLocaleString('es-CL')}`}</strong>
@@ -5765,6 +7319,9 @@ function App() {
                                   }}>
                                     <span>🛒 Pedidos: <strong>{t.cantidad_pedidos}</strong></span>
                                     <span>💵 Efec: <strong>${t.total_efectivo.toLocaleString('es-CL')}</strong></span>
+                                    {t.total_gastos > 0 && (
+                                      <span style={{ color: '#ef4444' }}>💸 Gastos: <strong>-${t.total_gastos.toLocaleString('es-CL')}</strong></span>
+                                    )}
                                     <span>💳 Tarj: <strong>${(t.total_debito + t.total_credito).toLocaleString('es-CL')}</strong></span>
                                     <span>📦 Envs: <strong>${t.total_envases.toLocaleString('es-CL')}</strong></span>
                                   </div>
@@ -5817,8 +7374,80 @@ function App() {
 
                   <div style={{ display: 'grid', gridTemplateColumns: user?.cargo?.toLowerCase() === 'administrador' ? '1fr 1fr' : '1fr', gap: '2rem', flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: '0.25rem', paddingBottom: '1rem' }}>
                     
-                    {/* Columna Izquierda: Operación, Impuestos y Envases */}
+                    {/* Columna Izquierda: Operación, Impuestos, Escala y Envases */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                      
+                      {/* Configuración de Resolución de Pantalla */}
+                      <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--modal-bg, #231209)', borderRadius: '20px', padding: '1.25rem', border: '1.5px solid var(--accent-primary)', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
+                        <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          📺 Resolución de Pantalla y Adaptación Visual
+                        </h4>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                          Selecciona la resolución de tu computador para que la interfaz se adapte perfectamente a toda la pantalla sin dejar espacios en blanco ni elementos gigantes.
+                        </p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>Seleccionar Resolución Predeterminada</label>
+                            <select
+                              value={appResolucion}
+                              onChange={(e) => setAppResolucion(e.target.value)}
+                              className="form-input"
+                              style={{
+                                padding: '0.65rem 1rem',
+                                fontSize: '0.95rem',
+                                fontWeight: '700',
+                                height: '44px',
+                                color: 'var(--text-primary)',
+                                background: 'var(--input-bg)',
+                                border: '1.5px solid var(--accent-primary)',
+                                borderRadius: '12px',
+                                width: '100%',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {RESOLUCIONES_PANTALLA.map(res => (
+                                <option key={res.id} value={res.id}>
+                                  {res.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Tarjetas selectoras de resolución */}
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.5rem', marginTop: '0.25rem' }}>
+                            {RESOLUCIONES_PANTALLA.map(res => (
+                              <button
+                                key={res.id}
+                                type="button"
+                                onClick={() => setAppResolucion(res.id)}
+                                style={{
+                                  padding: '0.65rem 0.5rem',
+                                  fontSize: '0.8rem',
+                                  fontWeight: '700',
+                                  borderRadius: '12px',
+                                  cursor: 'pointer',
+                                  textAlign: 'center',
+                                  border: appResolucion === res.id ? '1.5px solid var(--accent-primary)' : '1px solid var(--glass-border)',
+                                  background: appResolucion === res.id ? 'linear-gradient(135deg, var(--accent-primary) 0%, #ef4444 100%)' : 'var(--item-bg)',
+                                  color: appResolucion === res.id ? '#ffffff' : 'var(--text-primary)',
+                                  boxShadow: appResolucion === res.id ? '0 4px 12px var(--accent-glow)' : 'none',
+                                  transition: 'all 0.2s ease',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  gap: '0.2rem'
+                                }}
+                              >
+                                <span>{res.id === '1366x768' ? '💻 1366x768' : res.id === '1280x720' ? '💻 1280x720' : res.id === '1600x900' ? '🖥️ 1600x900' : res.id === '1920x1080' ? '🖥️ 1920x1080' : res.id === '2560x1440' ? '🖥️ 2560x1440' : '🔄 Auto'}</span>
+                                <span style={{ fontSize: '0.7rem', opacity: appResolucion === res.id ? 0.95 : 0.7 }}>
+                                  {res.id === '1366x768' ? 'Laptop HD (Ideal)' : res.id === '1280x720' ? 'Compacto 720p' : res.id === '1600x900' ? 'Estándar HD+' : res.id === '1920x1080' ? 'Full HD 1080p' : res.id === '2560x1440' ? 'Monitor 2K' : 'Automático'}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                       
                       {/* Impresora (si aplica) */}
                       {window.electronAPI && (
@@ -5860,6 +7489,47 @@ function App() {
                         </div>
                       )}
 
+                      {/* Gestión de Base de Datos Local SQLite */}
+                      {window.electronAPI && (
+                        <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--modal-bg, #231209)', borderRadius: '16px', padding: '1.25rem', border: '1.5px solid var(--accent-primary)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
+                          <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            💾 Base de Datos del Sistema (SQLite)
+                          </h4>
+                          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                            Abre directamente la carpeta donde reside tu archivo <code>database.sqlite</code> para hacer respaldos, copias de seguridad o gestionar la información.
+                          </p>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={async () => {
+                              try {
+                                if (window.electronAPI && typeof window.electronAPI.openDbFolder === 'function') {
+                                  const res = await window.electronAPI.openDbFolder();
+                                  if (!res?.success && res?.error) {
+                                    alert('Error abriendo carpeta: ' + res.error);
+                                  }
+                                }
+                              } catch (e) {
+                                console.error(e);
+                              }
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '0.6rem',
+                              padding: '0.75rem 1.25rem',
+                              fontSize: '0.9rem',
+                              fontWeight: 'bold',
+                              cursor: 'pointer',
+                              borderRadius: '10px'
+                            }}
+                          >
+                            <span>📂</span> Abrir Carpeta de la Base de Datos
+                          </button>
+                        </div>
+                      )}
+
                       {/* Envase para Llevar */}
                       {user?.cargo?.toLowerCase() === 'administrador' && (
                         <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)' }}>
@@ -5879,9 +7549,9 @@ function App() {
                                 value={precioEnvase}
                                 onChange={(e) => {
                                   const val = e.target.value;
-                                  setPrecioEnvase(val === '' ? '' : parseInt(val, 10) || 0);
+                                  setPrecioEnvase(val === '' ? '' : parseInt(val.toString().replace(/\D/g, ''), 10) || 0);
                                 }}
-                                onBlur={() => setPrecioEnvase(parseInt(precioEnvase, 10) || 0)}
+                                onBlur={() => setPrecioEnvase(parseInt(precioEnvase.toString().replace(/\D/g, ''), 10) || 0)}
                                 style={{ height: '38px', fontSize: '0.95rem', paddingLeft: '2.2rem', paddingRight: '0.75rem', width: '100%', boxSizing: 'border-box', color: 'var(--text-primary)' }}
                               />
                               <span className="input-icon" style={{ left: '0.75rem' }}>💲</span>
@@ -6061,15 +7731,21 @@ function App() {
                                 type="button"
                                 className="btn-secondary"
                                 style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }}
-                                disabled={configLoading}
+                                disabled={testEmailLoading}
                                 onClick={async () => {
                                   try {
-                                    setConfigLoading(true);
+                                    setTestEmailLoading(true);
                                     setConfigSuccess('');
                                     setConfigError('');
                                     
                                     const config = {
-                                      REPORT_EMAIL_TO: configEmailTo
+                                      REPORT_EMAIL_TO: configEmailTo,
+                                      REPORT_EMAIL_FROM: configSmtpUser,
+                                      SMTP_HOST: configSmtpHost,
+                                      SMTP_PORT: String(configSmtpPort),
+                                      SMTP_SECURE: configSmtpSecure ? 'true' : 'false',
+                                      SMTP_USER: configSmtpUser,
+                                      SMTP_PASS: configSmtpPass
                                     };
 
                                     let saveResponse = await fetch('http://127.0.0.1:5000/api/configuracion', {
@@ -6095,13 +7771,93 @@ function App() {
                                     console.error(err);
                                     setConfigError(err.message || 'Error de red al enviar correo de prueba.');
                                   } finally {
-                                    setConfigLoading(false);
+                                    setTestEmailLoading(false);
                                   }
                                 }}
                               >
-                                {configLoading ? 'Enviando...' : '📧 Probar Envío'}
+                                {testEmailLoading ? 'Enviando...' : '📧 Probar Envío'}
                               </button>
                             </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Configuración Servidor SMTP */}
+                      {user?.cargo?.toLowerCase() === 'administrador' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)', marginTop: '1rem' }}>
+                          <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            ⚙️ Servidor de Salida de Correos (SMTP)
+                          </h4>
+                          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                            Configura las credenciales de tu proveedor de correo para permitir el envío automático de reportes.
+                          </p>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Servidor SMTP</label>
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="smtp.gmail.com"
+                                value={configSmtpHost}
+                                onChange={(e) => setConfigSmtpHost(e.target.value)}
+                                style={{ height: '38px', color: 'var(--text-primary)' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Puerto</label>
+                              <input
+                                type="text"
+                                className="form-input"
+                                placeholder="587"
+                                value={configSmtpPort}
+                                onChange={(e) => setConfigSmtpPort(e.target.value)}
+                                style={{ height: '38px', color: 'var(--text-primary)' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Correo Emisor / Usuario</label>
+                              <input
+                                type="email"
+                                className="form-input"
+                                placeholder="tu-correo@gmail.com"
+                                value={configSmtpUser}
+                                onChange={(e) => setConfigSmtpUser(e.target.value)}
+                                style={{ height: '38px', color: 'var(--text-primary)' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <label style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Contraseña de Aplicación</label>
+                              <input
+                                type="password"
+                                className="form-input"
+                                placeholder="••••••••••••••••"
+                                value={configSmtpPass}
+                                onChange={(e) => setConfigSmtpPass(e.target.value)}
+                                style={{ height: '38px', color: 'var(--text-primary)' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', gridColumn: '1 / -1' }}>
+                              <input
+                                type="checkbox"
+                                id="smtpSecure"
+                                checked={configSmtpSecure}
+                                onChange={(e) => setConfigSmtpSecure(e.target.checked)}
+                              />
+                              <label htmlFor="smtpSecure" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', cursor: 'pointer' }}>Usar conexión segura (SSL/TLS para puerto 465)</label>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              style={{ flex: 1, padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                              disabled={configLoading}
+                              onClick={guardarConfiguracion}
+                            >
+                              {configLoading ? 'Guardando...' : 'Guardar Credenciales SMTP'}
+                            </button>
                           </div>
                         </div>
                       )}
@@ -6217,7 +7973,7 @@ function App() {
                       )}
 
                       {/* Llegada de Materia Prima */}
-                      <div style={{ background: 'rgba(255, 255, 255, 0.03)', borderRadius: '16px', padding: '1.25rem', border: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      <div style={{ background: 'var(--modal-bg, #231209)', borderRadius: '20px', padding: '1.25rem', border: '1.5px solid var(--accent-primary)', boxShadow: '0 10px 30px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.25rem', color: 'var(--text-primary)' }}>
                           📦 Llegada de Materia Prima
                         </h4>
@@ -6273,13 +8029,14 @@ function App() {
                                   position: 'relative',
                                   width: '100%',
                                   zIndex: 100,
-                                  background: '#31190d',
+                                  background: 'var(--bg-secondary)',
+                                  color: 'var(--text-primary)',
                                   border: '1.5px solid var(--accent-primary)',
                                   borderRadius: '12px',
                                   maxHeight: '200px',
                                   overflowY: 'auto',
                                   marginTop: '4px',
-                                  boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
+                                  boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
                                   padding: '4px'
                                 }}>
                                   {listaIngredientes
@@ -6342,7 +8099,7 @@ function App() {
                       </div>
 
                       {/* Consumo / Merma */}
-                      <div style={{ background: 'rgba(255, 140, 0, 0.06)', borderRadius: '16px', padding: '1.25rem', border: '1px solid rgba(217, 119, 6, 0.3)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      <div style={{ background: 'var(--modal-bg, #231209)', borderRadius: '20px', padding: '1.25rem', border: '1.5px solid #d97706', boxShadow: '0 10px 30px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                         <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.25rem', color: '#d97706' }}>
                           📉 Registro de Consumo / Merma
                         </h4>
@@ -6401,13 +8158,14 @@ function App() {
                                   position: 'relative',
                                   width: '100%',
                                   zIndex: 100,
-                                  background: '#31190d',
+                                  background: 'var(--bg-secondary)',
+                                  color: 'var(--text-primary)',
                                   border: '1.5px solid var(--accent-primary)',
                                   borderRadius: '12px',
                                   maxHeight: '200px',
                                   overflowY: 'auto',
                                   marginTop: '4px',
-                                  boxShadow: '0 12px 40px rgba(0,0,0,0.8)',
+                                  boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
                                   padding: '4px'
                                 }}>
                                   {listaIngredientes
@@ -6592,13 +8350,90 @@ function App() {
               <div className="admin-container animate-fade-in" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   
-                  {/* Header de la pestaña */}
-                  <div className="reportes-header">
-                    <div>
-                      <h3 className="section-title">📈 Reportes & Análisis de Ventas</h3>
-                      <p className="section-subtitle">Consulta métricas clave en tiempo real, analiza el rendimiento de productos y descarga informes en Excel</p>
+                  {/* Selector de Puntos / Sub-pestañas de Reportes */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className={`nav-tab ${subTabReportes === 'metricas' ? 'active' : ''}`}
+                        onClick={() => setSubTabReportes('metricas')}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.5rem 1.1rem', fontSize: '0.9rem' }}
+                      >
+                        📈 Dashboard & Métricas
+                      </button>
+                      <button
+                        type="button"
+                        className={`nav-tab ${subTabReportes === 'impresion' ? 'active' : ''}`}
+                        onClick={() => {
+                          setSubTabReportes('impresion');
+                          setFechaInicioImpresion(fechaInicioReporte);
+                          setFechaFinImpresion(fechaFinReporte);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                          padding: '0.5rem 1.1rem',
+                          fontSize: '0.9rem',
+                          fontWeight: '700',
+                          ...(subTabReportes === 'impresion' ? {
+                            background: 'linear-gradient(135deg, var(--accent-primary) 0%, #d97706 100%)',
+                            color: '#fff',
+                            borderColor: 'transparent',
+                            boxShadow: '0 2px 8px rgba(230, 81, 0, 0.3)'
+                          } : {})
+                        }}
+                      >
+                        🖨️ Impresión de Reportes
+                      </button>
                     </div>
+
+                    {subTabReportes === 'impresion' && (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => setSubTabReportes('metricas')}
+                        style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                      >
+                        ← Volver a Métricas
+                      </button>
+                    )}
                   </div>
+
+                  {subTabReportes === 'metricas' && (
+                    <>
+                      {/* Header de la pestaña */}
+                      <div className="reportes-header">
+                        <div>
+                          <h3 className="section-title">📈 Reportes & Análisis de Ventas</h3>
+                          <p className="section-subtitle">Consulta métricas clave en tiempo real, analiza el rendimiento de productos y descarga informes en Excel</p>
+                        </div>
+                        <div>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() => {
+                              setSubTabReportes('impresion');
+                              setFechaInicioImpresion(fechaInicioReporte);
+                              setFechaFinImpresion(fechaFinReporte);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              padding: '0.55rem 1.15rem',
+                              fontSize: '0.88rem',
+                              fontWeight: '700',
+                              borderRadius: '50px',
+                              border: '1px solid var(--accent-primary)',
+                              color: 'var(--accent-primary)',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            🖨️ Impresión de Reportes
+                          </button>
+                        </div>
+                      </div>
 
                   {/* Barra de Filtros & Presets */}
                   <div className="reportes-filters-bar">
@@ -6886,6 +8721,28 @@ function App() {
 
                       {/* Exportaciones & Acciones Rápidas */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                        {/* Impresión de Reportes Térmicos */}
+                        <div className="report-panel" style={{ border: '1px solid rgba(230, 81, 0, 0.3)', background: 'rgba(230, 81, 0, 0.04)' }}>
+                          <div>
+                            <h4 className="report-panel-title">🖨️ Impresión de Reportes</h4>
+                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
+                              Imprime tickets de Resumen Financiero, Resumen de Inventario o Productos por Categoría.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                            onClick={() => {
+                              setSubTabReportes('impresion');
+                              setFechaInicioImpresion(fechaInicioReporte);
+                              setFechaFinImpresion(fechaFinReporte);
+                            }}
+                          >
+                            🖨️ Ir a Impresión de Reportes
+                          </button>
+                        </div>
+
                         {/* Exportar Productos del Rango */}
                         <div className="report-panel">
                           <div>
@@ -6991,6 +8848,317 @@ function App() {
                     </div>
 
                   </div>
+                </>
+              )}
+
+              {subTabReportes === 'impresion' && (
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingRight: '0.5rem' }}>
+                  
+                  {/* Header de la sección de Impresión */}
+                  <div className="reportes-header" style={{ marginBottom: '0.75rem' }}>
+                    <div>
+                      <h3 className="section-title">🖨️ Impresión de Reportes Térmicos</h3>
+                      <p className="section-subtitle">Imprime reportes térmicos individuales o de un intervalo de fechas directamente en tu impresora POS</p>
+                    </div>
+                  </div>
+
+                  {/* Barra de Filtros: Intervalo y Turno */}
+                  <div className="reportes-filters-bar" style={{ padding: '0.85rem 1.25rem', marginBottom: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {/* Presets de Intervalo */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)', marginRight: '0.25rem' }}>Presets de Intervalo:</span>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('hoy')}>Hoy</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('ayer')}>Ayer</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('7dias')}>Últimos 7 días</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('esteMes')}>Este Mes</button>
+                      <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('mesPasado')}>Mes Pasado</button>
+                    </div>
+
+                    {/* Selectores de Rango y Turno */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)' }}>📅 Desde:</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          style={{ padding: '0.45rem 0.8rem', fontSize: '0.85rem', width: '145px', borderRadius: '50px' }}
+                          value={fechaInicioImpresion}
+                          onChange={(e) => {
+                            const newStart = e.target.value;
+                            setFechaInicioImpresion(newStart);
+                            if (fechaFinImpresion && newStart > fechaFinImpresion) {
+                              setFechaFinImpresion(newStart);
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)' }}>📅 Hasta:</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          style={{ padding: '0.45rem 0.8rem', fontSize: '0.85rem', width: '145px', borderRadius: '50px' }}
+                          value={fechaFinImpresion}
+                          onChange={(e) => {
+                            const newEnd = e.target.value;
+                            setFechaFinImpresion(newEnd);
+                            if (fechaInicioImpresion && newEnd < fechaInicioImpresion) {
+                              setFechaInicioImpresion(newEnd);
+                            }
+                          }}
+                        />
+                      </div>
+
+                      {fechaInicioImpresion === fechaFinImpresion ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <label style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)' }}>⏰ Turno:</label>
+                          <select
+                            value={filtroTurnoImpresion}
+                            onChange={(e) => {
+                              setFiltroTurnoImpresion(e.target.value);
+                            }}
+                            className="form-input"
+                            style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', borderRadius: '50px', maxWidth: '230px' }}
+                          >
+                            <option value="all">📅 Todo el día (Todos los turnos)</option>
+                            {listaTurnos
+                              .filter(t => {
+                                const tDateIni = new Date(t.fecha_hora_inicio);
+                                const yIni = tDateIni.getFullYear();
+                                const mIni = String(tDateIni.getMonth() + 1).padStart(2, '0');
+                                const dIni = String(tDateIni.getDate()).padStart(2, '0');
+                                const dateIniStr = `${yIni}-${mIni}-${dIni}`;
+
+                                let dateFinStr = '';
+                                if (t.fecha_hora_fin) {
+                                  const tDateFin = new Date(t.fecha_hora_fin);
+                                  const yFin = tDateFin.getFullYear();
+                                  const mFin = String(tDateFin.getMonth() + 1).padStart(2, '0');
+                                  const dFin = String(tDateFin.getDate()).padStart(2, '0');
+                                  dateFinStr = `${yFin}-${mFin}-${dFin}`;
+                                }
+                                const todayStr = new Date().toISOString().split('T')[0];
+                                return dateIniStr === fechaInicioImpresion || dateFinStr === fechaInicioImpresion || (Boolean(t.activo) && fechaInicioImpresion === todayStr);
+                              })
+                              .map(t => (
+                                <option key={t.id} value={t.id}>
+                                  ⏰ Turno #{t.id} ({t.usuario_inicio})
+                                </option>
+                              ))
+                            }
+                          </select>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(59, 130, 246, 0.12)', border: '1px solid rgba(59, 130, 246, 0.35)', padding: '0.35rem 0.85rem', borderRadius: '50px', fontSize: '0.82rem', color: '#93c5fd' }}>
+                          <span>📆 <strong>Intervalo activo:</strong> Consolidando todos los turnos del período</span>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: '0.45rem 1.1rem', fontSize: '0.85rem', borderRadius: '50px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                        onClick={() => cargarCierreParaImpresion(fechaInicioImpresion, fechaFinImpresion, filtroTurnoImpresion)}
+                      >
+                        🔄 Recargar Datos
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Barra de Estado del Intervalo / Período */}
+                  {(() => {
+                    const isIntervalo = fechaFinImpresion && fechaFinImpresion !== fechaInicioImpresion;
+                    const fIniParts = (fechaInicioImpresion || '').split('-');
+                    const fFinParts = (fechaFinImpresion || '').split('-');
+                    const fIniDisplay = fIniParts.length === 3 ? `${fIniParts[2]}/${fIniParts[1]}/${fIniParts[0]}` : fechaInicioImpresion;
+                    const fFinDisplay = fFinParts.length === 3 ? `${fFinParts[2]}/${fFinParts[1]}/${fFinParts[0]}` : fechaFinImpresion;
+
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.6rem 1rem', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', border: '1px solid var(--glass-border)', fontSize: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '1.1rem' }}>📋</span>
+                          <span>
+                            {isIntervalo ? (
+                              <>Imprimiendo intervalo: <strong style={{ color: 'var(--accent-primary)' }}>{fIniDisplay} al {fFinDisplay}</strong> <span style={{ color: 'var(--text-secondary)' }}>(Turnos consolidados)</span></>
+                            ) : (
+                              <>Imprimiendo fecha: <strong style={{ color: 'var(--accent-primary)' }}>{fIniDisplay}</strong> {filtroTurnoImpresion !== 'all' ? <span style={{ color: 'var(--text-secondary)' }}>(Turno #{filtroTurnoImpresion})</span> : <span style={{ color: 'var(--text-secondary)' }}>(Día completo)</span>}</>
+                            )}
+                          </span>
+                        </div>
+                        {loadingCierreImpresion ? (
+                          <span style={{ color: 'var(--accent-primary)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            ⏳ Actualizando métricas...
+                          </span>
+                        ) : (
+                          <span style={{ color: '#10b981', fontWeight: '600', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
+                            Datos listos para enviar a impresora
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {mensajeImpresion && (
+                    <div className="alert alert-success animate-fade-in" style={{ padding: '0.75rem 1.25rem', borderRadius: '12px', fontWeight: '600' }}>
+                      <span>{mensajeImpresion}</span>
+                    </div>
+                  )}
+
+                  {/* Lista de los 3 Reportes */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginTop: '0.5rem' }}>
+                    
+                    {/* 1. Resumen Financiero */}
+                    <div className="report-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(16, 185, 129, 0.4)', background: 'linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, rgba(0,0,0,0) 100%)', borderRadius: '16px', padding: '1.5rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '2rem' }}>💵</span>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>1. Resumen Financiero</h4>
+                            <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: '700', textTransform: 'uppercase' }}>Ventas, Arqueo y Caja</span>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '1rem' }}>
+                          Imprime el balance de ventas totales, desglose en efectivo, débito, crédito, gastos pagados, comandas eliminadas y el arqueo de caja con sobrantes o faltantes.
+                        </p>
+                        
+                        {cierreDataImpresion ? (
+                          <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '1.25rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Total Ventas:</span>
+                              <strong style={{ color: '#10b981' }}>${(cierreDataImpresion.total_ventas || 0).toLocaleString('es-CL')}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Efectivo:</span>
+                              <span>${(cierreDataImpresion.total_efectivo || 0).toLocaleString('es-CL')}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Tarjetas:</span>
+                              <span>${(cierreDataImpresion.total_tarjeta || 0).toLocaleString('es-CL')}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Gastos:</span>
+                              <span style={{ color: '#ef4444' }}>-${(cierreDataImpresion.total_gastos || 0).toLocaleString('es-CL')}</span>
+                            </div>
+                          </div>
+                        ) : loadingCierreImpresion ? (
+                          <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>Cargando datos...</div>
+                        ) : null}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={loadingCierreImpresion || imprimiendoTipo === 'financiero'}
+                        onClick={handleImprimirFinancieroReportes}
+                        style={{ width: '100%', padding: '0.8rem 1rem', fontSize: '0.9rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)' }}
+                      >
+                        {imprimiendoTipo === 'financiero' ? '⏳ Imprimiendo...' : '🖨️ Imprimir Resumen Financiero'}
+                      </button>
+                    </div>
+
+                    {/* 2. Resumen Inventario */}
+                    <div className="report-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(245, 158, 11, 0.4)', background: 'linear-gradient(180deg, rgba(245, 158, 11, 0.05) 0%, rgba(0,0,0,0) 100%)', borderRadius: '16px', padding: '1.5rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '2rem' }}>🥑</span>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>2. Resumen Inventario</h4>
+                            <span style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '700', textTransform: 'uppercase' }}>Movimientos de Bodega y Stock</span>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '1rem' }}>
+                          Imprime exclusivamente métricas de bodega: materia prima gastada por recetas (con unidades), mermas, consumo de personal, compras/llegada de mercadería y existencias actuales.
+                        </p>
+                        
+                        {cierreDataImpresion ? (
+                          <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '1.25rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Ingredientes Gastados:</span>
+                              <strong style={{ color: '#f59e0b' }}>{cierreDataImpresion.ingredientes_gastados?.length || 0} ítems</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Llegada de Mercadería:</span>
+                              <span>{cierreDataImpresion.entradas_inventario?.length || 0} registros</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Mermas / Consumo:</span>
+                              <span>{cierreDataImpresion.mermas_inventario?.length || 0} registros</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Stock en Sistema:</span>
+                              <span>{listaIngredientes?.length || 0} ingredientes</span>
+                            </div>
+                          </div>
+                        ) : loadingCierreImpresion ? (
+                          <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>Cargando datos...</div>
+                        ) : null}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={loadingCierreImpresion || imprimiendoTipo === 'inventario'}
+                        onClick={handleImprimirInventarioReportes}
+                        style={{ width: '100%', padding: '0.8rem 1rem', fontSize: '0.9rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.25)' }}
+                      >
+                        {imprimiendoTipo === 'inventario' ? '⏳ Imprimiendo...' : '🖨️ Imprimir Resumen Inventario'}
+                      </button>
+                    </div>
+
+                    {/* 3. Productos por Categoría */}
+                    <div className="report-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(59, 130, 246, 0.4)', background: 'linear-gradient(180deg, rgba(59, 130, 246, 0.05) 0%, rgba(0,0,0,0) 100%)', borderRadius: '16px', padding: '1.5rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '2rem' }}>📦</span>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>3. Productos por Categoría</h4>
+                            <span style={{ fontSize: '0.75rem', color: '#3b82f6', fontWeight: '700', textTransform: 'uppercase' }}>Consolidado de Unidades</span>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '1rem' }}>
+                          Imprime el desglose consolidado de productos y promociones vendidos, ordenados y agrupados según su categoría oficial (Hamburguesas, Bebidas, Envases, etc.).
+                        </p>
+                        
+                        {cierreDataImpresion ? (
+                          <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '1.25rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Variedades Vendidas:</span>
+                              <strong style={{ color: '#3b82f6' }}>{cierreDataImpresion.productos_unificados?.length || 0} ítems</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Categorías:</span>
+                              <span>{listaCategorias?.length || 0} activas</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Envases Vendidos:</span>
+                              <span>{cierreDataImpresion.envases_vendidos?.cantidad || 0} u.</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Total Unidades:</span>
+                              <span>{(cierreDataImpresion.productos_unificados || []).reduce((acc, p) => acc + (p.cantidad || 0), 0)} u.</span>
+                            </div>
+                          </div>
+                        ) : loadingCierreImpresion ? (
+                          <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>Cargando datos...</div>
+                        ) : null}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={loadingCierreImpresion || imprimiendoTipo === 'productos'}
+                        onClick={handleImprimirProductosReportes}
+                        style={{ width: '100%', padding: '0.8rem 1rem', fontSize: '0.9rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.25)' }}
+                      >
+                        {imprimiendoTipo === 'productos' ? '⏳ Imprimiendo...' : '🖨️ Imprimir Productos por Categoría'}
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              )}
 
                 </div>
               </div>
@@ -7006,17 +9174,59 @@ function App() {
       </main>
 
       {showShiftPrompt && (
-        <div className="custom-modal-overlay">
-          <div className="custom-modal-card" style={{ maxWidth: '420px' }}>
-            <div className="custom-modal-header">
-              <span className="custom-modal-icon">🔑</span>
-              <h3 className="custom-modal-title">Apertura de Turno Requerida</h3>
+        <div className="custom-modal-overlay" style={{ background: 'var(--modal-overlay-bg, rgba(0, 0, 0, 0.8))', backdropFilter: 'blur(8px)' }}>
+          <form 
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (efectivoInicialInput === '' || isNaN(parseFloat(efectivoInicialInput)) || parseFloat(efectivoInicialInput) < 0) {
+                const msg = 'Por favor, ingresa un monto válido para el efectivo inicial de apertura.';
+                setErrorShiftInput(msg);
+                abrirAlerta(msg, 'Monto Inválido');
+                return;
+              }
+              setErrorShiftInput('');
+              setShowShiftPrompt(false);
+              await iniciarTurno(null, efectivoInicialInput);
+              setEfectivoInicialInput('');
+            }}
+            className="custom-modal-card" 
+            style={{ maxWidth: '440px', background: 'var(--modal-bg, #231209)', border: '1.5px solid var(--accent-primary)', boxShadow: '0 20px 60px rgba(0,0,0,0.85)', color: 'var(--text-primary)' }}
+          >
+            <div className="custom-modal-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span className="custom-modal-icon">🔑</span>
+                <h3 className="custom-modal-title">Apertura de Turno de Caja</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowShiftPrompt(false);
+                  setErrorShiftInput('');
+                  setEfectivoInicialInput('');
+                  if (activeTab === 'pedidos') {
+                    setActiveTab('inventario');
+                  }
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  fontSize: '1.25rem',
+                  cursor: 'pointer',
+                  padding: '0.2rem 0.5rem',
+                  lineHeight: '1',
+                  borderRadius: '6px'
+                }}
+                title="Cerrar y continuar sin abrir turno"
+              >
+                ✕
+              </button>
             </div>
             <div className="custom-modal-body">
-              <p className="custom-modal-message" style={{ marginBottom: '1.25rem' }}>
-                No hay ningún turno de trabajo activo actualmente. Debes iniciar un nuevo turno para poder operar en el sistema de comandas.
+              <p className="custom-modal-message" style={{ marginBottom: '1.25rem', fontSize: '0.92rem', lineHeight: '1.5' }}>
+                No hay un turno de caja activo actualmente. Puedes ingresar el monto inicial de apertura para habilitar la <strong>pestaña de pedidos</strong>, o continuar al sistema (la pestaña de pedidos permanecerá deshabilitada hasta que ingreses el monto inicial).
               </p>
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <div className="form-group" style={{ marginBottom: '1.25rem' }}>
                 <label className="form-label" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600' }}>Efectivo Inicial en Caja ($) <span style={{ color: 'red' }}>*</span></label>
                 <div className="input-wrapper" style={{ position: 'relative' }}>
                   <input
@@ -7024,6 +9234,7 @@ function App() {
                     className="form-input"
                     placeholder="Monto de apertura (ej. 15000)"
                     value={efectivoInicialInput}
+                    autoFocus
                     onChange={(e) => {
                       setEfectivoInicialInput(e.target.value);
                       if (errorShiftInput) setErrorShiftInput('');
@@ -7044,74 +9255,85 @@ function App() {
                 )}
               </div>
             </div>
-            <div className="custom-modal-footer" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => {
-                  setShowShiftPrompt(false);
-                  setErrorShiftInput('');
-                  handleLogout();
-                }}
-              >
-                🚪 Cerrar Sesión
-              </button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={async () => {
-                  if (efectivoInicialInput === '' || isNaN(parseFloat(efectivoInicialInput)) || parseFloat(efectivoInicialInput) < 0) {
-                    const msg = 'Por favor, ingresa un monto válido para el efectivo inicial de apertura.';
-                    setErrorShiftInput(msg);
-                    abrirAlerta(msg, 'Monto Inválido');
-                    return;
-                  }
-                  setErrorShiftInput('');
-                  setShowShiftPrompt(false);
-                  await iniciarTurno(null, efectivoInicialInput);
-                  setEfectivoInicialInput('');
-                }}
-              >
-                🔑 Iniciar Turno
-              </button>
+            <div className="custom-modal-footer" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', width: '100%' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setShowShiftPrompt(false);
+                    setErrorShiftInput('');
+                    setEfectivoInicialInput('');
+                    if (activeTab === 'pedidos') {
+                      setActiveTab('inventario');
+                    }
+                  }}
+                  style={{ whiteSpace: 'nowrap', padding: '0.7rem 0.5rem', fontSize: '0.88rem' }}
+                  title="Entrar al programa manteniendo la pestaña de pedidos deshabilitada"
+                >
+                  Continuar sin abrir turno
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ whiteSpace: 'nowrap', padding: '0.7rem 0.5rem', fontSize: '0.88rem' }}
+                >
+                  🔑 Iniciar Turno
+                </button>
+              </div>
+              <div style={{ textAlign: 'center', marginTop: '0.2rem' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowShiftPrompt(false);
+                    setErrorShiftInput('');
+                    handleLogout();
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  🚪 Cerrar Sesión
+                </button>
+              </div>
             </div>
-          </div>
+          </form>
         </div>
       )}
       {showCerrarTurnoPrompt && (
-        <div className="custom-modal-overlay">
-          <div className="custom-modal-card" style={{ maxWidth: '450px' }}>
+        <div className="custom-modal-overlay" style={{ background: 'var(--modal-overlay-bg, rgba(0, 0, 0, 0.8))', backdropFilter: 'blur(8px)' }}>
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (efectivoFinalInput === '' || isNaN(parseFloat(efectivoFinalInput)) || parseFloat(efectivoFinalInput) < 0) {
+                const msg = 'Por favor, ingresa un monto válido para el efectivo final de cierre.';
+                setErrorCerrarShiftInput(msg);
+                abrirAlerta(msg, 'Monto Inválido');
+                return;
+              }
+              setErrorCerrarShiftInput('');
+              setShowPromptImprimirFinanciero(true);
+            }}
+            className="custom-modal-card" 
+            style={{ maxWidth: '450px', maxHeight: '92vh', overflowY: 'auto', background: 'var(--modal-bg, #231209)', border: '1.5px solid var(--accent-primary)', boxShadow: '0 20px 60px rgba(0,0,0,0.85)', color: 'var(--text-primary)' }}
+          >
             <div className="custom-modal-header">
               <span className="custom-modal-icon">🔐</span>
               <h3 className="custom-modal-title">Arqueo y Cierre de Turno #{activeShift?.id}</h3>
             </div>
             <div className="custom-modal-body">
-              <p className="custom-modal-message" style={{ marginBottom: '1rem', fontSize: '0.88rem' }}>
-                Cuenta e ingresa el efectivo total final en caja. El sistema calculará la diferencia automáticamente.
+              <p className="custom-modal-message" style={{ marginBottom: '1.25rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                Cuenta e ingresa el efectivo total final en caja. El sistema registrará el arqueo y cierre del turno.
               </p>
               
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.25rem' }}>
-                {activeShiftSalesInfo ? (
-                  <div className="cierre-live-summary" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '0.65rem 0.75rem', borderRadius: '10px', fontSize: '0.85rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                      <span>💵 Fondo Inicial de Apertura:</span>
-                      <strong>${(activeShift.efectivo_inicial || 0).toLocaleString('es-CL')}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                      <span>🍔 Ventas en Efectivo del Turno:</span>
-                      <strong>${(activeShiftSalesInfo.total_efectivo || 0).toLocaleString('es-CL')}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed rgba(255,255,255,0.1)', paddingTop: '0.35rem', fontWeight: '700' }}>
-                      <span>💰 Efectivo Esperado en Caja:</span>
-                      <strong>${((activeShift.efectivo_inicial || 0) + (activeShiftSalesInfo.total_efectivo || 0)).toLocaleString('es-CL')}</strong>
-                    </div>
-                  </div>
-                ) : (
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Calculando resumen de ventas del turno...</p>
-                )}
-
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div className="form-group">
-                  <label className="form-label" style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.85rem' }}>
+                  <label className="form-label" style={{ display: 'block', marginBottom: '0.45rem', fontWeight: '700', fontSize: '0.88rem' }}>
                     Efectivo Final en Caja ($) <span style={{ color: 'red' }}>*</span>
                   </label>
                   <div className="input-wrapper" style={{ position: 'relative' }}>
@@ -7120,6 +9342,7 @@ function App() {
                       className="form-input"
                       placeholder="Monto de cierre (ej. 45000)"
                       value={efectivoFinalInput}
+                      autoFocus
                       onChange={(e) => {
                         setEfectivoFinalInput(e.target.value);
                         if (errorCerrarShiftInput) setErrorCerrarShiftInput('');
@@ -7129,41 +9352,17 @@ function App() {
                         background: 'var(--input-bg)', 
                         paddingLeft: '2.5rem',
                         borderColor: errorCerrarShiftInput ? '#ef4444' : undefined,
-                        height: '36px'
+                        height: '42px',
+                        fontSize: '1rem',
+                        fontWeight: '600'
                       }}
                     />
-                    <span className="input-icon" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)' }}>💵</span>
+                    <span className="input-icon" style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', fontSize: '1.1rem' }}>💵</span>
                   </div>
                 </div>
 
-                {activeShiftSalesInfo && efectivoFinalInput !== '' && (
-                  (() => {
-                    const expected = (activeShift.efectivo_inicial || 0) + (activeShiftSalesInfo.total_efectivo || 0);
-                    const declared = parseFloat(efectivoFinalInput) || 0;
-                    const diff = declared - expected;
-                    return (
-                      <div style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        padding: '0.5rem 0.75rem', 
-                        borderRadius: '8px', 
-                        fontSize: '0.85rem', 
-                        fontWeight: '700',
-                        background: diff === 0 ? 'rgba(16, 185, 129, 0.1)' : diff > 0 ? 'rgba(59, 130, 246, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: diff === 0 ? '#10b981' : diff > 0 ? '#3b82f6' : '#ef4444'
-                      }}>
-                        <span>Diferencia:</span>
-                        <span>
-                          {diff === 0 ? 'Caja Cuadrada ($0)' : `${diff > 0 ? 'Sobrante (+$' : 'Faltante (-$'}${Math.abs(diff).toLocaleString('es-CL')}`}
-                        </span>
-                      </div>
-                    );
-                  })()
-                )}
-
                 <div className="form-group">
-                  <label className="form-label" style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.85rem' }}>
+                  <label className="form-label" style={{ display: 'block', marginBottom: '0.45rem', fontWeight: '600', fontSize: '0.85rem' }}>
                     Observaciones / Notas
                   </label>
                   <textarea
@@ -7174,8 +9373,8 @@ function App() {
                     style={{ 
                       color: 'var(--text-primary)', 
                       background: 'var(--input-bg)', 
-                      height: '50px',
-                      padding: '0.4rem 0.65rem',
+                      height: '60px',
+                      padding: '0.5rem 0.75rem',
                       resize: 'none',
                       fontSize: '0.85rem'
                     }}
@@ -7203,43 +9402,102 @@ function App() {
                 Cancelar
               </button>
               <button
-                type="button"
+                type="submit"
                 className="btn-primary"
-                onClick={async () => {
-                  if (efectivoFinalInput === '' || isNaN(parseFloat(efectivoFinalInput)) || parseFloat(efectivoFinalInput) < 0) {
-                    const msg = 'Por favor, ingresa un monto válido para el efectivo final de cierre.';
-                    setErrorCerrarShiftInput(msg);
-                    abrirAlerta(msg, 'Monto Inválido');
-                    return;
-                  }
-                  setErrorCerrarShiftInput('');
-                  setShowCerrarTurnoPrompt(false);
-                  await cerrarTurno(efectivoFinalInput, observacionesCerrarShiftInput);
-                  setEfectivoFinalInput('');
-                  setObservacionesCerrarShiftInput('');
-                }}
               >
                 Confirmar y Cerrar
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showPromptImprimirFinanciero && (
+        <div className="custom-modal-overlay alert-modal-overlay" style={{ background: 'var(--modal-overlay-bg, rgba(0, 0, 0, 0.85))', backdropFilter: 'blur(8px)', zIndex: 12000 }}>
+          <div className="custom-modal-card" style={{ maxWidth: '430px', background: 'var(--modal-bg, #231209)', border: '1.5px solid var(--accent-primary)', boxShadow: '0 20px 60px rgba(0,0,0,0.85)', color: 'var(--text-primary)', textAlign: 'center', padding: '1.75rem' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🖨️</div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: '800', color: 'var(--text-primary)', margin: '0 0 0.5rem 0' }}>
+              Cierre de Turno #{activeShift?.id}
+            </h3>
+            <p style={{ fontSize: '1.05rem', fontWeight: '700', color: 'var(--accent-primary)', margin: '0 0 0.75rem 0' }}>
+              ¿Desea imprimir el resumen financiero?
+            </p>
+            <div style={{ background: 'rgba(255, 255, 255, 0.04)', borderRadius: '10px', padding: '0.6rem 0.8rem', border: '1px solid var(--glass-border)', marginBottom: '1.25rem', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Monto final ingresado:</span>
+              <strong style={{ color: '#10b981' }}>${parseFloat(efectivoFinalInput || 0).toLocaleString('es-CL')}</strong>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', width: '100%' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ width: '100%', padding: '0.75rem 1rem', fontSize: '0.95rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)' }}
+                autoFocus
+                onClick={async () => {
+                  const finalCash = efectivoFinalInput;
+                  const obs = observacionesCerrarShiftInput;
+                  setShowPromptImprimirFinanciero(false);
+                  setShowCerrarTurnoPrompt(false);
+                  setEfectivoFinalInput('');
+                  setObservacionesCerrarShiftInput('');
+                  if (window.electronAPI) {
+                    await imprimirReporteFinancieroModal(finalCash, obs);
+                  }
+                  await cerrarTurno(finalCash, obs);
+                }}
+              >
+                🖨️ Sí, Imprimir Resumen Financiero
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ width: '100%', padding: '0.65rem 1rem', fontSize: '0.88rem', borderRadius: '50px' }}
+                onClick={async () => {
+                  const finalCash = efectivoFinalInput;
+                  const obs = observacionesCerrarShiftInput;
+                  setShowPromptImprimirFinanciero(false);
+                  setShowCerrarTurnoPrompt(false);
+                  setEfectivoFinalInput('');
+                  setObservacionesCerrarShiftInput('');
+                  await cerrarTurno(finalCash, obs);
+                }}
+              >
+                No imprimir, solo cerrar turno
+              </button>
+
+              <button
+                type="button"
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '0.3rem', cursor: 'pointer', textDecoration: 'underline' }}
+                onClick={() => {
+                  setShowPromptImprimirFinanciero(false);
+                }}
+              >
+                ← Volver a revisar monto
               </button>
             </div>
           </div>
         </div>
       )}
       {showPromptCliente && (
-        <div className="custom-modal-overlay">
-          <div className="custom-modal-card">
+        <div className="custom-modal-overlay" style={{ background: 'var(--modal-overlay-bg, rgba(0, 0, 0, 0.8))', backdropFilter: 'blur(8px)' }}>
+          <div className="custom-modal-card" style={{ background: 'var(--modal-bg, #231209)', border: '1.5px solid var(--accent-primary)', boxShadow: '0 20px 60px rgba(0,0,0,0.85)', color: 'var(--text-primary)' }}>
             <form onSubmit={handleSubmitPedido}>
               <div className="custom-modal-header">
-                <span className="custom-modal-icon">👤</span>
-                <h3 className="custom-modal-title">Confirmar Pedido</h3>
+                <span className="custom-modal-icon">{tipoTransaccion === 'Pedido Externo' ? '🛵' : '👤'}</span>
+                <h3 className="custom-modal-title">
+                  {tipoTransaccion === 'Pedido Externo' ? 'Confirmar Pedido Externo' : 'Confirmar Pedido'}
+                </h3>
               </div>
               <div className="custom-modal-body">
                 <p className="custom-modal-message" style={{ marginBottom: '1rem' }}>
-                  Por favor, ingresa el nombre del cliente para este pedido:
+                  {tipoTransaccion === 'Pedido Externo'
+                    ? 'Identificador o número de pedido en la plataforma (Ej. PedidosYa #324):'
+                    : 'Por favor, ingresa el nombre del cliente para este pedido:'}
                 </p>
                 <div className="form-group" style={{ margin: 0 }}>
                   <AutocompleteGhostInput
-                    placeholder="Nombre del Cliente (Ej. Carlos Muñoz)"
+                    placeholder={tipoTransaccion === 'Pedido Externo' ? "Identificador (Ej. PedidosYa #324 o nombre)" : "Nombre del Cliente (Ej. Carlos Muñoz)"}
                     value={clienteNombre}
                     suggestions={Array.from(new Set(historialPedidos.map(p => p.cliente_nombre).filter(Boolean)))}
                     onSelectSuggestion={(sug) => setClienteNombre(sug)}
@@ -7276,18 +9534,60 @@ function App() {
                       </button>
                     </div>
 
-                    {/* Fila Inferior: Pago Mixto centrado y compacto */}
-                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.1rem' }}>
+                    {/* Fila Inferior: Pago Mixto y Pedido Externo */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem', marginTop: '0.1rem' }}>
                       <button
                         type="button"
                         className={`delivery-option-btn ${tipoTransaccion === 'Mixto' ? 'active' : ''}`}
                         onClick={() => setTipoTransaccion('Mixto')}
-                        style={{ padding: '0.45rem 1.25rem', fontSize: '0.85rem' }}
+                        style={{ padding: '0.45rem 0.5rem', fontSize: '0.85rem' }}
                       >
                         🔀 Pago Mixto
                       </button>
+                      <button
+                        type="button"
+                        className={`delivery-option-btn ${tipoTransaccion === 'Pedido Externo' ? 'active' : ''}`}
+                        onClick={() => {
+                          setTipoTransaccion('Pedido Externo');
+                          setTipoEntrega('Llevar');
+                          if (!clienteNombre || clienteNombre.trim() === '') {
+                            setClienteNombre('PedidosYa');
+                          }
+                        }}
+                        style={{ 
+                          padding: '0.45rem 0.5rem', 
+                          fontSize: '0.85rem',
+                          borderColor: tipoTransaccion === 'Pedido Externo' ? '#e11d48' : undefined,
+                          color: tipoTransaccion === 'Pedido Externo' ? '#ffffff' : undefined,
+                          background: tipoTransaccion === 'Pedido Externo' ? 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)' : undefined
+                        }}
+                      >
+                        🛵 Pedido Externo
+                      </button>
                     </div>
                   </div>
+
+                  {tipoTransaccion === 'Pedido Externo' && (
+                    <div style={{
+                      marginTop: '0.85rem',
+                      padding: '0.75rem 0.95rem',
+                      borderRadius: '12px',
+                      background: 'rgba(244, 63, 94, 0.12)',
+                      border: '1.5px solid rgba(244, 63, 94, 0.35)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.25rem',
+                      fontSize: '0.82rem'
+                    }}>
+                      <span style={{ fontWeight: 'bold', color: '#f43f5e', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span>🛵</span> Modo Pedido Externo (PedidosYa / Apps)
+                      </span>
+                      <span style={{ color: 'var(--text-secondary)', lineHeight: 1.35 }}>
+                        • Descontará inventario y guardará el ticket en el historial.<br/>
+                        • <strong>No sumará dinero a la caja ($0)</strong> en efectivo ni tarjeta.
+                      </span>
+                    </div>
+                  )}
 
                   {tipoTransaccion === 'Mixto' && (() => {
                     const envasesInfo = calcularEnvases(pedido, tipoEntrega);
@@ -7419,17 +9719,21 @@ function App() {
                       boxSizing: 'border-box'
                     }}>
                       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, paddingRight: '1rem' }}>
-                        <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', fontWeight: '700' }}>
-                          Total a Pagar
+                        <span style={{ fontSize: '0.95rem', color: tipoTransaccion === 'Pedido Externo' ? '#f43f5e' : 'var(--text-secondary)', fontWeight: '700' }}>
+                          {tipoTransaccion === 'Pedido Externo' ? 'Total en Caja (Pedido Externo)' : 'Total a Pagar'}
                         </span>
-                        {tipoEntrega === 'Llevar' && envasesInfo.montoTotal > 0 && (
+                        {tipoTransaccion === 'Pedido Externo' ? (
+                          <span style={{ fontSize: '0.78rem', color: '#f43f5e', fontWeight: '500', marginTop: '0.2rem' }}>
+                            (Pagado en PedidosYa / App — No ingresa dinero a caja)
+                          </span>
+                        ) : (tipoEntrega === 'Llevar' && envasesInfo.montoTotal > 0 && (
                           <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)', fontWeight: '500', marginTop: '0.2rem' }}>
                             (Incluye +${envasesInfo.montoTotal.toLocaleString('es-CL')} de envases)
                           </span>
-                        )}
+                        ))}
                       </div>
-                      <span style={{ fontSize: '1.65rem', fontWeight: '800', color: 'var(--accent-primary)', letterSpacing: '-0.5px', whiteSpace: 'nowrap' }}>
-                        ${grandTotal.toLocaleString('es-CL', { minimumFractionDigits: 0 })}
+                      <span style={{ fontSize: '1.65rem', fontWeight: '800', color: tipoTransaccion === 'Pedido Externo' ? '#f43f5e' : 'var(--accent-primary)', letterSpacing: '-0.5px', whiteSpace: 'nowrap' }}>
+                        {tipoTransaccion === 'Pedido Externo' ? '$0' : `$${grandTotal.toLocaleString('es-CL', { minimumFractionDigits: 0 })}`}
                       </span>
                     </div>
                   );
@@ -7446,8 +9750,12 @@ function App() {
                 <button
                   type="submit"
                   className="btn-primary custom-modal-btn-confirm"
+                  style={{
+                    background: tipoTransaccion === 'Pedido Externo' ? 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)' : undefined,
+                    borderColor: tipoTransaccion === 'Pedido Externo' ? '#e11d48' : undefined
+                  }}
                 >
-                  Aceptar
+                  {tipoTransaccion === 'Pedido Externo' ? '🛵 Confirmar Pedido Externo' : 'Aceptar'}
                 </button>
               </div>
             </form>
@@ -7484,18 +9792,60 @@ function App() {
               {localDireccion && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>📍 {localDireccion}</div>}
               {localTelefono && <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>📞 Tel: {localTelefono}</div>}
               <div className="comanda-ticket-number">Ticket N° {comandaData.ticket}</div>
-              <div style={{ marginTop: '0.5rem', fontWeight: 'bold', fontSize: '0.95rem', color: comandaData.tipo_entrega === 'Llevar' ? '#dc2626' : '#059669' }}>
-                {comandaData.tipo_entrega === 'Llevar' ? 'PARA LLEVAR' : 'PARA SERVIR'}
-                {comandaData.tipo_transaccion && ` | MÉT. PAGO: ${comandaData.tipo_transaccion.toUpperCase()}`}
-                {comandaData.tipo_transaccion === 'Mixto' && comandaData.pago_mixto_detalle && (
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600', marginTop: '0.15rem' }}>
-                    ({comandaData.pago_mixto_detalle})
-                  </div>
-                )}
-              </div>
+              {comandaData.tipo_entrega === 'Llevar' ? (
+                <div style={{
+                  marginTop: '0.6rem',
+                  marginBottom: '0.4rem',
+                  padding: '0.55rem 0.75rem',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  color: '#ffffff',
+                  fontWeight: '900',
+                  fontSize: '1.05rem',
+                  letterSpacing: '1px',
+                  textAlign: 'center',
+                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.35)'
+                }}>
+                  🛍️ ★★★ PEDIDO PARA LLEVAR ★★★
+                  {comandaData.tipo_transaccion && (
+                    <div style={{ fontSize: '0.82rem', fontWeight: '700', color: '#fee2e2', marginTop: '0.2rem' }}>
+                      PAGO: {comandaData.tipo_transaccion.toUpperCase()}
+                      {comandaData.tipo_transaccion === 'Mixto' && comandaData.pago_mixto_detalle ? ` (${comandaData.pago_mixto_detalle})` : ''}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  marginTop: '0.6rem',
+                  marginBottom: '0.4rem',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '10px',
+                  background: 'rgba(5, 150, 105, 0.12)',
+                  border: '1.5px solid #059669',
+                  color: '#059669',
+                  fontWeight: '800',
+                  fontSize: '1rem',
+                  textAlign: 'center'
+                }}>
+                  🍽️ PEDIDO PARA SERVIR
+                  {comandaData.tipo_transaccion && (
+                    <div style={{ fontSize: '0.8rem', fontWeight: '600', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                      PAGO: {comandaData.tipo_transaccion.toUpperCase()}
+                      {comandaData.tipo_transaccion === 'Mixto' && comandaData.pago_mixto_detalle ? ` (${comandaData.pago_mixto_detalle})` : ''}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="comanda-date-time">
-                <span>Fecha: {new Date(comandaData.fecha_hora).toLocaleDateString('es-CL')}</span>
-                <span>Hora: {new Date(comandaData.fecha_hora).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}</span>
+                {(() => {
+                  const { fechaStr, horaStr } = parseFechaHoraChile(comandaData.fecha_hora);
+                  return (
+                    <>
+                      <span>Fecha: {fechaStr}</span>
+                      <span style={{ marginLeft: '16px' }}>Hora: {horaStr} hrs</span>
+                    </>
+                  );
+                })()}
               </div>
             </div>
 
@@ -7504,19 +9854,20 @@ function App() {
               <table className="comanda-table">
                 <thead>
                   <tr>
-                    <th>Cant</th>
-                    <th>Producto</th>
-                    <th style={{ textAlign: 'right' }}>Precio</th>
+                    <th style={{ width: '15%', paddingLeft: '0.2rem', whiteSpace: 'nowrap' }}>Cant</th>
+                    <th style={{ width: '63%' }}>Producto</th>
+                    <th style={{ width: '22%', textAlign: 'right', paddingRight: '0.2rem', whiteSpace: 'nowrap' }}>Precio</th>
                   </tr>
                 </thead>
                 <tbody>
                   {comandaData.productos.map((prod, idx) => {
                     const subItems = getPromoSubItems(prod);
+                    const mostrarNombre = isOptionEnabled(prod.mostrar_nombre_ticket, true);
                     return (
                       <tr key={idx}>
                         <td>{prod.cantidad}</td>
                         <td>
-                          <div style={{ fontWeight: 'bold' }}>{prod.nombre || 'Producto'}</div>
+                          {mostrarNombre && <div style={{ fontWeight: 'bold' }}>{prod.nombre || 'Producto'}</div>}
                           {subItems.length > 0 && (
                             <div style={{ fontSize: '0.8rem', color: '#10b981', marginTop: '0.15rem', fontWeight: '600' }}>
                               {subItems.map((sub, sIdx) => (
@@ -7622,7 +9973,7 @@ function App() {
         const isCategoryGrid = (pasoActual.opciones || []).length >= 6;
 
         return (
-          <div className="custom-modal-overlay">
+          <div className="custom-modal-overlay" style={{ background: 'rgba(0, 0, 0, 0.78)', backdropFilter: 'blur(8px)' }}>
             <div 
               className="custom-modal" 
               style={{ 
@@ -7632,7 +9983,10 @@ function App() {
                 borderRadius: '20px', 
                 maxHeight: '90vh', 
                 display: 'flex', 
-                flexDirection: 'column' 
+                flexDirection: 'column',
+                background: 'var(--bg-secondary)',
+                border: '1.5px solid var(--accent-primary)',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.85)'
               }}
             >
               <div className="custom-modal-header" style={{ marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -7670,34 +10024,10 @@ function App() {
                   flex: 1 
                 }}>
                   {(() => {
-                    const multiplier = (selectedPromo.pasos && selectedPromo.pasos.length) || 2;
-                    const preciosOpciones = (pasoActual.opciones || []).map(o => {
-                      const p = productos.find(pr => pr.id === o.producto_id);
-                      return p ? parseFloat(p.precio) || 0 : (parseFloat(o.precio_producto) || 0);
-                    }).filter(p => p > 0);
-
-                    let precioModaPaso = 0;
-                    if (preciosOpciones.length > 0) {
-                      const frecs = {};
-                      let maxF = 0;
-                      preciosOpciones.forEach(p => {
-                        frecs[p] = (frecs[p] || 0) + 1;
-                        if (frecs[p] > maxF) {
-                          maxF = frecs[p];
-                          precioModaPaso = p;
-                        }
-                      });
-                    }
-
                     return (pasoActual.opciones || []).map((opc) => {
                       const prodRef = productos.find(p => p.id === opc.producto_id);
                       const emojiItem = prodRef?.imagen || '🍔';
-                      
-                      let extraVal = parseFloat(opc.precio_adicional) || 0;
-                      if (prodRef && precioModaPaso > 0) {
-                        const singleDiff = (parseFloat(prodRef.precio) || 0) - precioModaPaso;
-                        extraVal = singleDiff * multiplier;
-                      }
+                      const extraVal = getOpcionExtraValue(opc);
 
                       const isChosenInPreviousStep = chosenPromoOpciones.some(opt => opt.producto_id === opc.producto_id);
 
@@ -7768,7 +10098,7 @@ function App() {
                   {(pasoActual.opciones || []).map((opc) => {
                     const prodRef = productos.find(p => p.id === opc.producto_id);
                     const emojiItem = prodRef?.imagen || '🎁';
-                    const extraVal = parseFloat(opc.precio_adicional) || 0;
+                    const extraVal = getOpcionExtraValue(opc);
                     const isChosenInPreviousStep = chosenPromoOpciones.some(opt => opt.producto_id === opc.producto_id);
 
                     return (
@@ -7850,17 +10180,17 @@ function App() {
       })()}
       
       {showDeleteModal && pedidoToDelete && (
-        <div className="custom-modal-overlay">
-          <div className="custom-modal-content" style={{ maxWidth: '440px', padding: '1.5rem', background: 'var(--modal-bg, #1e1e2e)', borderRadius: '16px', border: '1.5px solid rgba(239, 68, 68, 0.4)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+        <div className="custom-modal-overlay" style={{ background: 'var(--modal-overlay-bg, rgba(0, 0, 0, 0.75))', backdropFilter: 'blur(6px)' }}>
+          <div className="custom-modal-content" style={{ maxWidth: '440px', padding: '1.5rem', background: 'var(--modal-bg, var(--bg-secondary))', color: 'var(--text-primary)', borderRadius: '16px', border: '1.5px solid rgba(239, 68, 68, 0.4)', boxShadow: '0 12px 35px rgba(0,0,0,0.35)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
               <span style={{ fontSize: '1.8rem' }}>🗑️</span>
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ef4444', fontWeight: 'bold' }}>Eliminar Comanda</h3>
-                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Requiere autorización del Administrador</p>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#dc2626', fontWeight: 'bold' }}>Eliminar Comanda</h3>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Requiere clave de autorización</p>
               </div>
             </div>
 
-            <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '0.85rem', borderRadius: '10px', border: '1px solid rgba(239, 68, 68, 0.25)', marginBottom: '1.25rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+            <div style={{ background: 'rgba(239, 68, 68, 0.08)', padding: '0.85rem', borderRadius: '10px', border: '1px solid rgba(239, 68, 68, 0.25)', marginBottom: '1.25rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
               ¿Estás seguro de que deseas eliminar el <strong>Ticket #{pedidoToDelete.id}</strong> ({pedidoToDelete.cliente_nombre}) por un valor de <strong>${parseFloat(pedidoToDelete.total).toLocaleString('es-CL')}</strong>?
               <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 ⚠️ Se recalculará el total diario y los ingredientes utilizados se devolverán al inventario.
@@ -7869,21 +10199,29 @@ function App() {
 
             <form onSubmit={handleConfirmDeletePedido} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="form-group">
-                <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>
-                  🔒 Contraseña de Administrador ({user?.nombre || 'Admin'})
+                <label className="form-label" style={{ fontSize: '0.85rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                  🔒 Contraseña de Autorización ({user?.nombre || 'Usuario'})
                 </label>
                 <input
                   type="password"
                   className="form-input"
-                  placeholder="Ingresa la contraseña para autorizar"
+                  placeholder="Ingresa tu contraseña para autorizar"
                   value={adminPasswordInput}
                   onChange={(e) => setAdminPasswordInput(e.target.value)}
+                  style={{
+                    background: 'var(--input-bg)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--glass-border)',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '8px',
+                    width: '100%'
+                  }}
                   autoFocus
                 />
               </div>
 
               {errorDeleteModal && (
-                <div className="alert alert-error" style={{ margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.82rem' }}>
+                <div className="alert alert-error" style={{ margin: 0, padding: '0.5rem 0.75rem', fontSize: '0.82rem', background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px' }}>
                   <span>{errorDeleteModal}</span>
                 </div>
               )}
@@ -7892,7 +10230,7 @@ function App() {
                 <button
                   type="button"
                   className="btn-secondary"
-                  style={{ flex: 1, padding: '0.6rem', fontSize: '0.88rem' }}
+                  style={{ flex: 1, padding: '0.65rem', fontSize: '0.88rem', background: 'var(--btn-secondary-bg)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}
                   onClick={() => {
                     setShowDeleteModal(false);
                     setPedidoToDelete(null);
@@ -7906,7 +10244,7 @@ function App() {
                   type="submit"
                   className="btn-danger"
                   disabled={loadingDeleteModal}
-                  style={{ flex: 1, padding: '0.6rem', fontSize: '0.88rem', background: '#ef4444', color: 'white', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                  style={{ flex: 1, padding: '0.65rem', fontSize: '0.88rem', background: '#dc2626', color: 'white', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(220,38,38,0.3)' }}
                 >
                   {loadingDeleteModal ? 'Eliminando...' : 'Confirmar Eliminación'}
                 </button>
@@ -7916,8 +10254,8 @@ function App() {
         </div>
       )}
       {modalConfig.isOpen && (
-        <div className="custom-modal-overlay alert-modal-overlay">
-          <div className="custom-modal-card">
+        <div className="custom-modal-overlay alert-modal-overlay" style={{ background: 'var(--modal-overlay-bg, rgba(0, 0, 0, 0.8))', backdropFilter: 'blur(8px)', zIndex: 10000 }}>
+          <div className="custom-modal-card" style={{ background: 'var(--modal-bg, #231209)', border: '1.5px solid var(--accent-primary)', boxShadow: '0 20px 60px rgba(0,0,0,0.85)', color: 'var(--text-primary)' }}>
             <div className="custom-modal-header">
               <span className="custom-modal-icon">{modalConfig.isAlert ? '⚠️' : '❓'}</span>
               <h3 className="custom-modal-title">{modalConfig.title}</h3>

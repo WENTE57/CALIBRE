@@ -5,6 +5,7 @@
   "scripts": {
     "install:all": "npm install --prefix backend && npm install --prefix frontend",
     "start": "npm run electron:dev --prefix frontend",
+    "build:exe": "npm run build:exe --prefix frontend",
     "reporte:enviar": "npm run reporte:enviar --prefix backend"
   }
 }
