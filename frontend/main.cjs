@@ -11,7 +11,18 @@ process.on('uncaughtException', (err) => {
     const path = require('path');
     const appDir = process.env.USER_DATA_PATH || (process.platform === 'win32' ? process.env.APPDATA : process.env.HOME);
     if (appDir) {
-      fs.appendFileSync(path.join(appDir, 'calibre_error.log'), `[${new Date().toISOString()}] ${err && err.stack ? err.stack : err}\n`);
+      fs.appendFileSync(path.join(appDir, 'calibre_error.log'), `[${new Date().toISOString()}] Uncaught Exception: ${err && err.stack ? err.stack : err}\n`);
+    }
+  } catch (e) {}
+});
+
+process.on('unhandledRejection', (reason) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const appDir = process.env.USER_DATA_PATH || (process.platform === 'win32' ? process.env.APPDATA : process.env.HOME);
+    if (appDir) {
+      fs.appendFileSync(path.join(appDir, 'calibre_error.log'), `[${new Date().toISOString()}] Unhandled Rejection: ${reason && reason.stack ? reason.stack : reason}\n`);
     }
   } catch (e) {}
 });
@@ -43,11 +54,14 @@ if (process.platform === 'win32') {
   console.info = safeLog(console.info);
 }
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
+
+// Desactivar completamente la barra de menús por defecto (File, Edit, View, Window)
+Menu.setApplicationMenu(null);
 
 // Ruta del socket / Named Pipe para comunicación 100% en memoria (Cero puertos TCP)
 const PIPE_PATH = process.platform === 'win32'
@@ -122,8 +136,13 @@ function createWindow() {
     },
     // Icono decorativo de la app
     icon: path.join(__dirname, 'public/favicon.ico'),
-    title: 'Calibre Desktop'
+    title: 'CALIBRE',
+    autoHideMenuBar: true
   });
+
+  // Remover la barra de menú superior
+  mainWindow.setMenu(null);
+  mainWindow.on('page-title-updated', (e) => e.preventDefault());
 
   const isDev = !app.isPackaged;
   if (isDev) {
@@ -139,8 +158,24 @@ function createWindow() {
   // Maximizar la ventana principal al arrancar para usar toda la pantalla
   mainWindow.maximize();
 
+  mainWindow.on('close', () => {
+    // Destruir ventana oculta de impresión para que no impida el cierre de la aplicación
+    if (reusablePrintWin && !reusablePrintWin.isDestroyed()) {
+      try {
+        reusablePrintWin.destroy();
+      } catch (e) {}
+      reusablePrintWin = null;
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
+    // Cerrar la aplicación al 100% y terminar el proceso de Node/Electron
+    app.quit();
+    setTimeout(() => {
+      try { app.exit(0); } catch (e) {}
+      try { process.exit(0); } catch (e) {}
+    }, 100);
   });
 }
 
@@ -160,16 +195,24 @@ function startBackend() {
     userDataPath = path.join(__dirname, '../backend');
     console.log(`[Electron] Modo desarrollo: utilizando base de datos en: ${path.join(userDataPath, 'database.sqlite')}`);
   } else {
-    // En producción, guardar en una carpeta "data" junto al ejecutable
+    // En producción, guardar en una carpeta "data" junto al ejecutable o en userData si no hay permisos
     const exeDir = path.dirname(app.getPath('exe'));
     userDataPath = path.join(exeDir, 'data');
-    if (!fs.existsSync(userDataPath)) {
-      try {
+    let isWritable = false;
+    try {
+      if (!fs.existsSync(userDataPath)) {
         fs.mkdirSync(userDataPath, { recursive: true });
-      } catch (e) {
-        console.error('[Electron] Error creando la carpeta data:', e);
-        userDataPath = app.getPath('userData'); // Fallback si no hay permisos
       }
+      const testFile = path.join(userDataPath, '.test_' + Date.now());
+      fs.writeFileSync(testFile, '1');
+      fs.unlinkSync(testFile);
+      isWritable = true;
+    } catch (e) {
+      console.warn('[Electron] Carpeta data en exeDir no tiene permisos de escritura. Usando userData:', e.message);
+      userDataPath = path.join(app.getPath('userData'), 'data');
+      try {
+        if (!fs.existsSync(userDataPath)) fs.mkdirSync(userDataPath, { recursive: true });
+      } catch (e2) {}
     }
 
     // Copiar la base de datos inicial si aún no existe en userDataPath
@@ -192,6 +235,19 @@ function startBackend() {
           }
         }
       }
+    } else {
+      // Si el usuario pegó un archivo database.sqlite más reciente en la raíz del ejecutable, sincronizarlo hacia data/
+      const rootDbCandidate = path.join(exeDir, 'database.sqlite');
+      if (fs.existsSync(rootDbCandidate) && rootDbCandidate !== targetDbPath) {
+        try {
+          const rootStat = fs.statSync(rootDbCandidate);
+          const targetStat = fs.statSync(targetDbPath);
+          if (rootStat.mtimeMs > targetStat.mtimeMs + 2000) {
+            console.log('[Electron] Detectado database.sqlite más reciente en la carpeta raíz. Sincronizando hacia data/database.sqlite...');
+            fs.copyFileSync(rootDbCandidate, targetDbPath);
+          }
+        } catch (e) {}
+      }
     }
   }
 
@@ -199,13 +255,18 @@ function startBackend() {
   process.env.USE_SOCKET_PIPE = PIPE_PATH;
   process.env.USER_DATA_PATH = userDataPath;
 
-
   try {
     // Ejecutar el backend directamente dentro del proceso de Electron
     require(backendPath);
     console.log('[Electron] Servidor backend cargado con éxito.');
   } catch (err) {
     console.error('[Electron] Error al intentar arrancar el proceso del backend:', err);
+    try {
+      dialog.showErrorBox(
+        'Calibre POS - Advertencia',
+        'Ocurrió un error al cargar la base de datos o el backend:\n\n' + (err && err.message ? err.message : err)
+      );
+    } catch (e) {}
   }
 }
 
@@ -280,16 +341,44 @@ app.whenReady().then(() => {
   });
 });
 
-// Cerrar toda la app cuando se cierran las ventanas (excepto en macOS)
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
+// Cerrar y destruir ventanas antes de que la aplicación empiece a salir
+app.on('before-quit', () => {
+  if (reusablePrintWin && !reusablePrintWin.isDestroyed()) {
+    try {
+      reusablePrintWin.destroy();
+    } catch (e) {}
+    reusablePrintWin = null;
   }
 });
 
-// Asegurarse de limpiar recursos si es necesario al cerrar
+// Cerrar toda la app cuando se cierran las ventanas (excepto en macOS)
+app.on('window-all-closed', () => {
+  if (reusablePrintWin && !reusablePrintWin.isDestroyed()) {
+    try {
+      reusablePrintWin.destroy();
+    } catch (e) {}
+    reusablePrintWin = null;
+  }
+  if (process.platform !== 'darwin') {
+    app.quit();
+    setTimeout(() => {
+      try { app.exit(0); } catch (e) {}
+      try { process.exit(0); } catch (e) {}
+    }, 100);
+  }
+});
+
+// Asegurarse de limpiar recursos y terminar al 100% el proceso de Windows/Node
 app.on('will-quit', () => {
   console.log('[Electron] Aplicación cerrándose...');
+  try {
+    if (reusablePrintWin && !reusablePrintWin.isDestroyed()) {
+      reusablePrintWin.destroy();
+      reusablePrintWin = null;
+    }
+  } catch (e) {}
+  try { app.exit(0); } catch (e) {}
+  try { process.exit(0); } catch (e) {}
 });
 
 // Cola de impresión secuencial para evitar conflictos en el spooler y garantizar que el auto-corte funcione en todos los tickets
@@ -1845,9 +1934,11 @@ ipcMain.handle('open-db-folder', async () => {
 });
 
 app.on('second-instance', () => {
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
+  } else {
+    createWindow();
   }
 });
 

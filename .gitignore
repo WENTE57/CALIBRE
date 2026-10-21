@@ -33,12 +33,14 @@ out/
 *.msi
 
 # Base de datos local y archivos de persistencia
-*.sqlite
-*.sqlite3
+*.sqlite*
+*.sqlite3*
 *.sqlite-wal
 *.sqlite-shm
-*.db
-backend/database.sqlite
+*.db*
+*.bak*
+*.backup*
+backend/database.sqlite*
 datos_postgres/
 
 # Logs del sistema y gestores de paquetes

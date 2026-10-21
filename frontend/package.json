@@ -1,5 +1,5 @@
 {
-  "name": "frontend",
+  "name": "calibre",
   "private": true,
   "version": "1.0.0",
   "description": "Calibre Desktop App",
@@ -44,7 +44,7 @@
   },
   "build": {
     "appId": "com.calibre.app",
-    "productName": "Calibre Desktop",
+    "productName": "CALIBRE",
     "directories": {
       "output": "dist-electron"
     },

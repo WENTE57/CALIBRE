@@ -3312,15 +3312,31 @@ app.post('/api/reportes/enviar', async (req, res) => {
       delete require.cache[require.resolve('./comando_gmail.js')];
     } catch (e) {}
     const { run } = require('./comando_gmail.js');
-    const turnoId = req.body && req.body.turno_id ? parseInt(req.body.turno_id, 10) : null;
-    console.log(`[Backend] Ejecutando envío de correo de reporte${turnoId ? ` para turno #${turnoId}` : ''}...`);
-    
-    const success = await run(turnoId);
-    
+    const { turno_id, fecha_inicio, fecha_fin, fecha } = req.body || {};
+
+    let options = null;
+    if (fecha_inicio || fecha) {
+      options = {
+        fechaInicio: fecha_inicio || fecha,
+        fechaFin: fecha_fin || fecha_inicio || fecha
+      };
+      console.log(`[Backend] Ejecutando envío de correo de reporte para rango ${options.fechaInicio} al ${options.fechaFin}...`);
+    } else if (turno_id) {
+      options = { shiftId: parseInt(turno_id, 10) };
+      console.log(`[Backend] Ejecutando envío de correo de reporte para turno #${options.shiftId}...`);
+    } else {
+      console.log('[Backend] Ejecutando envío de correo de reporte para turno activo o último...');
+    }
+
+    const success = await run(options);
+
     if (success) {
+      const msg = (options && options.fechaInicio)
+        ? `Reporte del período (${options.fechaInicio} al ${options.fechaFin}) enviado correctamente al correo.`
+        : 'Reporte de turno e inventario enviado correctamente al correo.';
       res.json({
         success: true,
-        message: 'Reporte de inventario enviado correctamente al correo.'
+        message: msg
       });
     } else {
       res.status(500).json({

@@ -774,6 +774,7 @@ function App() {
   const [enviandoCorreoReporte, setEnviandoCorreoReporte] = useState(false);
   const [mensajeCorreoReporte, setMensajeCorreoReporte] = useState('');
   const [tipoMensajeCorreoReporte, setTipoMensajeCorreoReporte] = useState('success');
+  const [tipoEnvioCorreoReporte, setTipoEnvioCorreoReporte] = useState('rango'); // 'rango' | 'turno'
   
   // Estados para Sub-pestaña e Impresión de Reportes
   const [subTabReportes, setSubTabReportes] = useState('metricas'); // 'metricas' | 'impresion'
@@ -3125,16 +3126,18 @@ function App() {
     }
   };
 
-  const descargarReporteProductosRango = async () => {
-    if (!fechaInicioReporte || !fechaFinReporte) return;
+  const descargarReporteProductosRango = async (fIni, fFin) => {
+    const start = fIni || (subTabReportes === 'impresion' ? fechaInicioImpresion : fechaInicioReporte);
+    const end = fFin || (subTabReportes === 'impresion' ? fechaFinImpresion : fechaFinReporte);
+    if (!start || !end) return;
     try {
-      const response = await fetch(`http://127.0.0.1:5000/api/informes/rango-productos/excel?fecha_inicio=${fechaInicioReporte}&fecha_fin=${fechaFinReporte}`);
+      const response = await fetch(`http://127.0.0.1:5000/api/informes/rango-productos/excel?fecha_inicio=${start}&fecha_fin=${end}`);
       if (!response.ok) throw new Error('Error al descargar');
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `Reporte_Productos_${fechaInicioReporte}_al_${fechaFinReporte}.xlsx`);
+      link.setAttribute('download', `Reporte_Productos_${start}_al_${end}.xlsx`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -7489,46 +7492,6 @@ function App() {
                         </div>
                       )}
 
-                      {/* Gestión de Base de Datos Local SQLite */}
-                      {window.electronAPI && (
-                        <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--modal-bg, #231209)', borderRadius: '16px', padding: '1.25rem', border: '1.5px solid var(--accent-primary)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
-                          <h4 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '0.5rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            💾 Base de Datos del Sistema (SQLite)
-                          </h4>
-                          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                            Abre directamente la carpeta donde reside tu archivo <code>database.sqlite</code> para hacer respaldos, copias de seguridad o gestionar la información.
-                          </p>
-                          <button
-                            type="button"
-                            className="btn-primary"
-                            onClick={async () => {
-                              try {
-                                if (window.electronAPI && typeof window.electronAPI.openDbFolder === 'function') {
-                                  const res = await window.electronAPI.openDbFolder();
-                                  if (!res?.success && res?.error) {
-                                    alert('Error abriendo carpeta: ' + res.error);
-                                  }
-                                }
-                              } catch (e) {
-                                console.error(e);
-                              }
-                            }}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: '0.6rem',
-                              padding: '0.75rem 1.25rem',
-                              fontSize: '0.9rem',
-                              fontWeight: 'bold',
-                              cursor: 'pointer',
-                              borderRadius: '10px'
-                            }}
-                          >
-                            <span>📂</span> Abrir Carpeta de la Base de Datos
-                          </button>
-                        </div>
-                      )}
 
                       {/* Envase para Llevar */}
                       {user?.cargo?.toLowerCase() === 'administrador' && (
@@ -8351,15 +8314,15 @@ function App() {
                 <div className="admin-card full-width" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   
                   {/* Selector de Puntos / Sub-pestañas de Reportes */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                       <button
                         type="button"
                         className={`nav-tab ${subTabReportes === 'metricas' ? 'active' : ''}`}
                         onClick={() => setSubTabReportes('metricas')}
-                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.5rem 1.1rem', fontSize: '0.9rem' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.45rem 1rem', fontSize: '0.88rem' }}
                       >
-                        📈 Dashboard & Métricas
+                        📊 Dashboard & Métricas
                       </button>
                       <button
                         type="button"
@@ -8373,8 +8336,8 @@ function App() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.45rem',
-                          padding: '0.5rem 1.1rem',
-                          fontSize: '0.9rem',
+                          padding: '0.45rem 1rem',
+                          fontSize: '0.88rem',
                           fontWeight: '700',
                           ...(subTabReportes === 'impresion' ? {
                             background: 'linear-gradient(135deg, var(--accent-primary) 0%, #d97706 100%)',
@@ -8384,7 +8347,7 @@ function App() {
                           } : {})
                         }}
                       >
-                        🖨️ Impresión de Reportes
+                        📄 Reportes & Impresión
                       </button>
                     </div>
 
@@ -8395,93 +8358,98 @@ function App() {
                         onClick={() => setSubTabReportes('metricas')}
                         style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
                       >
-                        ← Volver a Métricas
+                        ← Volver a Dashboard
                       </button>
                     )}
                   </div>
 
                   {subTabReportes === 'metricas' && (
                     <>
-                      {/* Header de la pestaña */}
+                      {/* Header compacto del Dashboard */}
                       <div className="reportes-header">
-                        <div>
-                          <h3 className="section-title">📈 Reportes & Análisis de Ventas</h3>
-                          <p className="section-subtitle">Consulta métricas clave en tiempo real, analiza el rendimiento de productos y descarga informes en Excel</p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                          <h3 className="section-title" style={{ fontSize: '1.05rem', margin: 0, fontWeight: '800' }}>
+                            📊 Dashboard & Métricas de Rendimiento
+                          </h3>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                            — Visualización interactiva y KPIs en tiempo real
+                          </span>
                         </div>
-                        <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <span style={{ 
+                            fontSize: '0.78rem', 
+                            color: 'var(--accent-primary)', 
+                            fontWeight: '700', 
+                            background: 'rgba(230, 81, 0, 0.12)', 
+                            padding: '0.2rem 0.65rem', 
+                            borderRadius: '20px', 
+                            border: '1px solid rgba(230, 81, 0, 0.25)' 
+                          }}>
+                            📅 {fechaInicioReporte} al {fechaFinReporte}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Barra de Filtros & Presets Compacta */}
+                      <div className="reportes-filters-bar">
+                        {/* Presets Rápidos */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)', marginRight: '0.2rem' }}>Presets:</span>
+                          <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('hoy')}>Hoy</button>
+                          <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('ayer')}>Ayer</button>
+                          <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('7dias')}>7 días</button>
+                          <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('esteMes')}>Este Mes</button>
+                          <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('mesPasado')}>Mes Pasado</button>
+                        </div>
+
+                        {/* Date Pickers + Filtrar Button Inline */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'nowrap', flexShrink: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                            <label style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)' }}>Desde</label>
+                            <input
+                              type="date"
+                              className="form-input"
+                              style={{ padding: '0.3rem 0.5rem', fontSize: '0.8rem', width: '125px', height: '32px', borderRadius: '8px', boxSizing: 'border-box' }}
+                              value={fechaInicioReporte}
+                              onChange={(e) => setFechaInicioReporte(e.target.value)}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                            <label style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)' }}>Hasta</label>
+                            <input
+                              type="date"
+                              className="form-input"
+                              style={{ padding: '0.3rem 0.5rem', fontSize: '0.8rem', width: '125px', height: '32px', borderRadius: '8px', boxSizing: 'border-box' }}
+                              value={fechaFinReporte}
+                              onChange={(e) => setFechaFinReporte(e.target.value)}
+                            />
+                          </div>
                           <button
                             type="button"
-                            className="btn-secondary"
-                            onClick={() => {
-                              setSubTabReportes('impresion');
-                              setFechaInicioImpresion(fechaInicioReporte);
-                              setFechaFinImpresion(fechaFinReporte);
-                            }}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.5rem',
-                              padding: '0.55rem 1.15rem',
-                              fontSize: '0.88rem',
-                              fontWeight: '700',
-                              borderRadius: '50px',
-                              border: '1px solid var(--accent-primary)',
-                              color: 'var(--accent-primary)',
+                            className="btn-primary"
+                            style={{ 
+                              width: 'auto',
+                              padding: '0.35rem 0.85rem', 
+                              fontSize: '0.8rem', 
+                              fontWeight: '700', 
+                              borderRadius: '8px', 
+                              height: '32px', 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: '0.3rem', 
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0,
                               cursor: 'pointer'
                             }}
+                            onClick={cargarReportesData}
                           >
-                            🖨️ Impresión de Reportes
+                            🔍 Filtrar
                           </button>
                         </div>
                       </div>
 
-                  {/* Barra de Filtros & Presets */}
-                  <div className="reportes-filters-bar">
-                    {/* Presets Rápidos */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', marginRight: '0.5rem' }}>Presets:</span>
-                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('hoy')}>Hoy</button>
-                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('ayer')}>Ayer</button>
-                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('7dias')}>Últimos 7 días</button>
-                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('esteMes')}>Este Mes</button>
-                      <button type="button" className="preset-chip" onClick={() => aplicarPresetFecha('mesPasado')}>Mes Pasado</button>
-                    </div>
-
-                    {/* Date Pickers */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Desde</label>
-                        <input
-                          type="date"
-                          className="form-input"
-                          style={{ padding: '0.5rem 0.8rem', fontSize: '0.85rem', width: '140px', borderRadius: '50px' }}
-                          value={fechaInicioReporte}
-                          onChange={(e) => setFechaInicioReporte(e.target.value)}
-                        />
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Hasta</label>
-                        <input
-                          type="date"
-                          className="form-input"
-                          style={{ padding: '0.5rem 0.8rem', fontSize: '0.85rem', width: '140px', borderRadius: '50px' }}
-                          value={fechaFinReporte}
-                          onChange={(e) => setFechaFinReporte(e.target.value)}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className="btn-primary"
-                        style={{ padding: '0.5rem 1.2rem', fontSize: '0.85rem', borderRadius: '50px' }}
-                        onClick={cargarReportesData}
-                      >
-                        🔍 Filtrar
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Contenido Principal de Reportes */}
-                  <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingRight: '0.5rem' }}>
+                  <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem', paddingRight: '0.5rem' }}>
                     
                     {/* Tarjetas de Métricas KPI */}
                     <div className="kpi-grid">
@@ -8719,132 +8687,124 @@ function App() {
                         )}
                       </div>
 
-                      {/* Exportaciones & Acciones Rápidas */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                        {/* Impresión de Reportes Térmicos */}
-                        <div className="report-panel" style={{ border: '1px solid rgba(230, 81, 0, 0.3)', background: 'rgba(230, 81, 0, 0.04)' }}>
+                      {/* Ranking de Productos Más Vendidos */}
+                      <div className="report-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div className="report-panel-header" style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div>
-                            <h4 className="report-panel-title">🖨️ Impresión de Reportes</h4>
-                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
-                              Imprime tickets de Resumen Financiero, Resumen de Inventario o Productos por Categoría.
-                            </p>
+                            <h4 className="report-panel-title">🏆 Top Productos Más Vendidos</h4>
+                            <p className="report-panel-subtitle">Ranking por volumen y recaudación en el período</p>
                           </div>
-                          <button
-                            type="button"
-                            className="btn-primary"
-                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
-                            onClick={() => {
-                              setSubTabReportes('impresion');
-                              setFechaInicioImpresion(fechaInicioReporte);
-                              setFechaFinImpresion(fechaFinReporte);
-                            }}
-                          >
-                            🖨️ Ir a Impresión de Reportes
-                          </button>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--accent-primary)', fontWeight: '700' }}>
+                            {reporteProductos?.length || 0} productos
+                          </span>
                         </div>
 
-                        {/* Exportar Productos del Rango */}
-                        <div className="report-panel">
-                          <div>
-                            <h4 className="report-panel-title">📦 Exportar Productos</h4>
-                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
-                              Descarga un Excel con todos los productos vendidos en el período que tienes seleccionado arriba.
-                            </p>
+                        {loadingReportes ? (
+                          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                            <div className="spinner"></div>
                           </div>
-                          <button
-                            type="button"
-                            className="btn-secondary"
-                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '1rem', border: '1px solid var(--accent-primary)', color: 'var(--accent-primary)', backgroundColor: 'transparent' }}
-                            onClick={descargarReporteProductosRango}
-                          >
-                            📥 Descargar Productos del Período
-                          </button>
-                        </div>
-                        
-                        {/* Exportar Reporte Mensual */}
-                        <div className="report-panel">
-                          <div>
-                            <h4 className="report-panel-title">📅 Reporte Mensual</h4>
-                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
-                              Descarga una planilla Excel con el resumen diario de ventas del mes.
-                            </p>
+                        ) : errorReportes ? (
+                          <div className="alert alert-error">
+                            <span>{errorReportes}</span>
                           </div>
-
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                            <label style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Seleccionar Mes</label>
-                            <input
-                              type="month"
-                              className="form-input"
-                              style={{ padding: '0.6rem 1rem', fontSize: '0.9rem', borderRadius: '50px', color: 'var(--text-primary)', textAlign: 'center' }}
-                              value={mesExcel}
-                              onChange={(e) => setMesExcel(e.target.value)}
-                            />
+                        ) : !reporteProductos || reporteProductos.length === 0 ? (
+                          <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                            No hay ventas de productos registradas en este período.
                           </div>
-
-                          <button
-                            type="button"
-                            className="btn-primary"
-                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '0.5rem' }}
-                            onClick={descargarExcelMensual}
-                          >
-                            📥 Descargar Excel Mensual
-                          </button>
-                        </div>
-
-                        {/* Envío de Reporte por Correo */}
-                        <div className="report-panel">
-                          <div>
-                            <h4 className="report-panel-title">📬 Envío por Correo</h4>
-                            <p className="report-panel-subtitle" style={{ marginTop: '0.5rem' }}>
-                              Envía el reporte completo de inventario y existencias a:
-                            </p>
+                        ) : (
+                          <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.55rem', paddingRight: '0.35rem' }}>
+                            {reporteProductos.slice(0, 10).map((prod, idx) => (
+                              <div 
+                                key={idx} 
+                                style={{ 
+                                  display: 'flex', 
+                                  justifyContent: 'space-between', 
+                                  alignItems: 'center', 
+                                  padding: '0.45rem 0.75rem', 
+                                  borderRadius: '10px', 
+                                  background: 'rgba(255, 255, 255, 0.03)', 
+                                  border: '1px solid var(--glass-border)' 
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                  <span style={{ 
+                                    fontWeight: '800', 
+                                    fontSize: '0.78rem', 
+                                    width: '22px', 
+                                    height: '22px', 
+                                    borderRadius: '50%', 
+                                    background: idx === 0 ? '#f59e0b' : idx === 1 ? '#94a3b8' : idx === 2 ? '#b45309' : 'rgba(255,255,255,0.08)', 
+                                    color: idx < 3 ? '#fff' : 'var(--text-secondary)', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center',
+                                    flexShrink: 0
+                                  }}>
+                                    #{idx + 1}
+                                  </span>
+                                  <div>
+                                    <div style={{ fontWeight: '700', fontSize: '0.83rem', color: 'var(--text-primary)' }}>{prod.producto}</div>
+                                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{prod.cantidad} {prod.cantidad === 1 ? 'unidad' : 'unidades'}</div>
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <div style={{ fontWeight: '800', fontSize: '0.85rem', color: 'var(--accent-primary)' }}>${(prod.total || 0).toLocaleString('es-CL')}</div>
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: '600' }}>{prod.porcentaje}%</div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                          
-                          <div style={{ background: 'var(--item-bg)', border: '1px solid var(--glass-border)', padding: '0.75rem 1rem', borderRadius: '12px', fontSize: '0.85rem', color: 'var(--accent-primary)', fontWeight: '700', textAlign: 'center', wordBreak: 'break-all' }}>
-                            {configEmailTo || 'No configurado'}
-                          </div>
-
-                          {mensajeCorreoReporte && (
-                            <div className={`alert alert-${tipoMensajeCorreoReporte}`} style={{ padding: '0.6rem 1rem', fontSize: '0.85rem', margin: 0, borderRadius: '12px' }}>
-                              <span>{mensajeCorreoReporte}</span>
-                            </div>
-                          )}
-
-                          <button
-                            type="button"
-                            className="btn-secondary"
-                            style={{ width: '100%', padding: '0.75rem', fontSize: '0.9rem', borderRadius: '50px', marginTop: '0.5rem' }}
-                            disabled={enviandoCorreoReporte}
-                            onClick={async () => {
-                              try {
-                                setEnviandoCorreoReporte(true);
-                                setMensajeCorreoReporte('');
-                                const response = await fetch('http://127.0.0.1:5000/api/reportes/enviar', {
-                                  method: 'POST'
-                                });
-                                const data = await response.json();
-                                if (response.ok && data.success) {
-                                  setTipoMensajeCorreoReporte('success');
-                                  setMensajeCorreoReporte('¡Reporte enviado exitosamente!');
-                                } else {
-                                  setTipoMensajeCorreoReporte('error');
-                                  setMensajeCorreoReporte(data.message || 'Error al enviar el reporte.');
-                                }
-                              } catch (err) {
-                                console.error(err);
-                                setTipoMensajeCorreoReporte('error');
-                                setMensajeCorreoReporte('Error de red al intentar enviar el correo.');
-                              } finally {
-                                setEnviandoCorreoReporte(false);
-                              }
-                            }}
-                          >
-                            {enviandoCorreoReporte ? 'Enviando Reporte...' : '📧 Enviar Reporte Ahora'}
-                          </button>
-                        </div>
-
+                        )}
                       </div>
 
+                    </div>
+
+                    {/* Banner de acceso directo a Centro de Reportes & Impresión */}
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'space-between', 
+                      padding: '0.85rem 1.25rem', 
+                      background: 'linear-gradient(135deg, rgba(230, 81, 0, 0.08) 0%, rgba(245, 158, 11, 0.04) 100%)', 
+                      border: '1px solid rgba(230, 81, 0, 0.25)', 
+                      borderRadius: '14px',
+                      flexWrap: 'wrap',
+                      gap: '0.75rem',
+                      marginBottom: '1rem'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <span style={{ fontSize: '1.6rem' }}>📑</span>
+                        <div>
+                          <h5 style={{ margin: 0, fontSize: '0.92rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                            ¿Necesitas descargar planillas Excel o imprimir los reportes oficiales?
+                          </h5>
+                          <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                            Emite tickets térmicos para tu impresora POS, descarga el detalle en Excel o envíalo por correo.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        style={{ 
+                          width: 'auto',
+                          padding: '0.45rem 1.1rem', 
+                          fontSize: '0.82rem', 
+                          fontWeight: '700', 
+                          borderRadius: '50px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          setSubTabReportes('impresion');
+                          setFechaInicioImpresion(fechaInicioReporte);
+                          setFechaFinImpresion(fechaFinReporte);
+                        }}
+                      >
+                        📄 Ir a Reportes & Impresión →
+                      </button>
                     </div>
 
                   </div>
@@ -8854,19 +8814,23 @@ function App() {
               {subTabReportes === 'impresion' && (
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingRight: '0.5rem' }}>
                   
-                  {/* Header de la sección de Impresión */}
-                  <div className="reportes-header" style={{ marginBottom: '0.75rem' }}>
-                    <div>
-                      <h3 className="section-title">🖨️ Impresión de Reportes Térmicos</h3>
-                      <p className="section-subtitle">Imprime reportes térmicos individuales o de un intervalo de fechas directamente en tu impresora POS</p>
+                  {/* Header de la sección de Reportes & Impresión */}
+                  <div className="reportes-header" style={{ marginBottom: '0.4rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <h3 className="section-title" style={{ fontSize: '1.05rem', margin: 0, fontWeight: '800' }}>
+                        📄 Centro de Reportes & Impresión
+                      </h3>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        — Emisión de tickets térmicos POS, descargas en Excel y balances por correo
+                      </span>
                     </div>
                   </div>
 
                   {/* Barra de Filtros: Intervalo y Turno */}
-                  <div className="reportes-filters-bar" style={{ padding: '0.85rem 1.25rem', marginBottom: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div className="reportes-filters-bar" style={{ padding: '0.65rem 1rem', marginBottom: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                     {/* Presets de Intervalo */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)', marginRight: '0.25rem' }}>Presets de Intervalo:</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-secondary)', marginRight: '0.2rem' }}>Presets de Intervalo:</span>
                       <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('hoy')}>Hoy</button>
                       <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('ayer')}>Ayer</button>
                       <button type="button" className="preset-chip" onClick={() => aplicarPresetImpresion('7dias')}>Últimos 7 días</button>
@@ -8875,13 +8839,13 @@ function App() {
                     </div>
 
                     {/* Selectores de Rango y Turno */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)' }}>📅 Desde:</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <label style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-secondary)' }}>📅 Desde:</label>
                         <input
                           type="date"
                           className="form-input"
-                          style={{ padding: '0.45rem 0.8rem', fontSize: '0.85rem', width: '145px', borderRadius: '50px' }}
+                          style={{ padding: '0.35rem 0.65rem', fontSize: '0.82rem', width: '135px', borderRadius: '8px', boxSizing: 'border-box' }}
                           value={fechaInicioImpresion}
                           onChange={(e) => {
                             const newStart = e.target.value;
@@ -8893,12 +8857,12 @@ function App() {
                         />
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)' }}>📅 Hasta:</label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <label style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-secondary)' }}>📅 Hasta:</label>
                         <input
                           type="date"
                           className="form-input"
-                          style={{ padding: '0.45rem 0.8rem', fontSize: '0.85rem', width: '145px', borderRadius: '50px' }}
+                          style={{ padding: '0.35rem 0.65rem', fontSize: '0.82rem', width: '135px', borderRadius: '8px', boxSizing: 'border-box' }}
                           value={fechaFinImpresion}
                           onChange={(e) => {
                             const newEnd = e.target.value;
@@ -8911,15 +8875,15 @@ function App() {
                       </div>
 
                       {fechaInicioImpresion === fechaFinImpresion ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <label style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-secondary)' }}>⏰ Turno:</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <label style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-secondary)' }}>⏰ Turno:</label>
                           <select
                             value={filtroTurnoImpresion}
                             onChange={(e) => {
                               setFiltroTurnoImpresion(e.target.value);
                             }}
                             className="form-input"
-                            style={{ padding: '0.45rem 1rem', fontSize: '0.85rem', borderRadius: '50px', maxWidth: '230px' }}
+                            style={{ padding: '0.35rem 0.8rem', fontSize: '0.82rem', borderRadius: '8px', maxWidth: '230px' }}
                           >
                             <option value="all">📅 Todo el día (Todos los turnos)</option>
                             {listaTurnos
@@ -8950,15 +8914,15 @@ function App() {
                           </select>
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'rgba(59, 130, 246, 0.12)', border: '1px solid rgba(59, 130, 246, 0.35)', padding: '0.35rem 0.85rem', borderRadius: '50px', fontSize: '0.82rem', color: '#93c5fd' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(59, 130, 246, 0.12)', border: '1px solid rgba(59, 130, 246, 0.35)', padding: '0.3rem 0.75rem', borderRadius: '8px', fontSize: '0.8rem', color: '#93c5fd' }}>
                           <span>📆 <strong>Intervalo activo:</strong> Consolidando todos los turnos del período</span>
                         </div>
                       )}
 
                       <button
                         type="button"
-                        className="btn-secondary"
-                        style={{ padding: '0.45rem 1.1rem', fontSize: '0.85rem', borderRadius: '50px', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                        className="btn-primary"
+                        style={{ width: 'auto', padding: '0.35rem 0.95rem', fontSize: '0.82rem', fontWeight: '700', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.35rem', cursor: 'pointer' }}
                         onClick={() => cargarCierreParaImpresion(fechaInicioImpresion, fechaFinImpresion, filtroTurnoImpresion)}
                       >
                         🔄 Recargar Datos
@@ -9006,7 +8970,20 @@ function App() {
                     </div>
                   )}
 
-                  {/* Lista de los 3 Reportes */}
+                  {/* SECCIÓN 1: REPORTES TÉRMICOS (POS) */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.75rem', marginBottom: '0.25rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.4rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '1.15rem' }}>🖨️</span>
+                      <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                        Tickets Térmicos POS (80mm)
+                      </h4>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Emisión física directa para caja y cocina
+                    </span>
+                  </div>
+
+                  {/* Grid de los 3 Reportes Térmicos */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginTop: '0.5rem' }}>
                     
                     {/* 1. Resumen Financiero */}
@@ -9153,6 +9130,205 @@ function App() {
                         style={{ width: '100%', padding: '0.8rem 1rem', fontSize: '0.9rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.25)' }}
                       >
                         {imprimiendoTipo === 'productos' ? '⏳ Imprimiendo...' : '🖨️ Imprimir Productos por Categoría'}
+                      </button>
+                    </div>
+
+                  </div>
+
+                  {/* SECCIÓN 2: EXPORTACIONES EXCEL Y ENVÍO DIGITAL */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '1.25rem', marginBottom: '0.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '0.4rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '1.15rem' }}>📊</span>
+                      <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                        Planillas Excel & Despacho por Correo
+                      </h4>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Descargas en formato .xlsx y balances digitales vía email
+                    </span>
+                  </div>
+
+                  {/* Grid de las 3 opciones digitales */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
+                    
+                    {/* 1. Exportar Productos del Período */}
+                    <div className="report-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(59, 130, 246, 0.4)', background: 'linear-gradient(180deg, rgba(59, 130, 246, 0.05) 0%, rgba(0,0,0,0) 100%)', borderRadius: '16px', padding: '1.5rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '2rem' }}>📦</span>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>Excel de Productos</h4>
+                            <span style={{ fontSize: '0.75rem', color: '#3b82f6', fontWeight: '700', textTransform: 'uppercase' }}>Detalle por Período</span>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '1rem' }}>
+                          Descarga un Excel detallado con todos los productos vendidos, cantidades exactas, precios unitarios y subtotales del rango consultado arriba.
+                        </p>
+                        
+                        <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--glass-border)', borderRadius: '12px', padding: '0.75rem 1rem', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '1.25rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Rango Seleccionado:</span>
+                            <strong style={{ color: '#60a5fa' }}>{fechaInicioImpresion === fechaFinImpresion ? fechaInicioImpresion : `${fechaInicioImpresion} al ${fechaFinImpresion}`}</strong>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Formato:</span>
+                            <span>Microsoft Excel (.xlsx)</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => descargarReporteProductosRango(fechaInicioImpresion, fechaFinImpresion)}
+                        style={{ width: '100%', padding: '0.8rem 1rem', fontSize: '0.9rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.25)', cursor: 'pointer' }}
+                      >
+                        📥 Descargar Excel de Productos
+                      </button>
+                    </div>
+
+                    {/* 2. Reporte Mensual en Excel */}
+                    <div className="report-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(139, 92, 246, 0.4)', background: 'linear-gradient(180deg, rgba(139, 92, 246, 0.05) 0%, rgba(0,0,0,0) 100%)', borderRadius: '16px', padding: '1.5rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '2rem' }}>📅</span>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>Reporte Mensual</h4>
+                            <span style={{ fontSize: '0.75rem', color: '#a855f7', fontWeight: '700', textTransform: 'uppercase' }}>Consolidado por Mes</span>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '1rem' }}>
+                          Descarga una planilla Excel con el resumen diario de ventas, desglose de medios de pago y flujo de caja de cualquier mes del año.
+                        </p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1.25rem' }}>
+                          <label style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-secondary)' }}>Seleccionar Mes a Consultar:</label>
+                          <input
+                            type="month"
+                            className="form-input"
+                            style={{ padding: '0.5rem 0.8rem', fontSize: '0.85rem', borderRadius: '8px', color: 'var(--text-primary)', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}
+                            value={mesExcel}
+                            onChange={(e) => setMesExcel(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={descargarExcelMensual}
+                        style={{ width: '100%', padding: '0.8rem 1rem', fontSize: '0.9rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 12px rgba(139, 92, 246, 0.25)', cursor: 'pointer' }}
+                      >
+                        📥 Descargar Excel Mensual
+                      </button>
+                    </div>
+
+                    {/* 3. Despacho por Correo Electrónico */}
+                    <div className="report-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', border: '1px solid rgba(230, 81, 0, 0.4)', background: 'linear-gradient(180deg, rgba(230, 81, 0, 0.05) 0%, rgba(0,0,0,0) 100%)', borderRadius: '16px', padding: '1.5rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                          <span style={{ fontSize: '2rem' }}>📬</span>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>Despacho por Correo</h4>
+                            <span style={{ fontSize: '0.75rem', color: '#f97316', fontWeight: '700', textTransform: 'uppercase' }}>Balance Financiero & Stock</span>
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '0.75rem' }}>
+                          Envía el informe ejecutivo con consumo de materia prima, balance y existencias a la casilla configurada:
+                        </p>
+
+                        <div style={{ background: 'var(--item-bg)', border: '1px solid var(--glass-border)', padding: '0.5rem 0.75rem', borderRadius: '8px', fontSize: '0.82rem', color: 'var(--accent-primary)', fontWeight: '700', textAlign: 'center', wordBreak: 'break-all', marginBottom: '0.75rem' }}>
+                          {configEmailTo || 'No configurado en Sistema'}
+                        </div>
+
+                        {/* Modalidad de Envío */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.75rem' }}>
+                          <label style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)' }}>Modalidad de Datos a Despachar:</label>
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => setTipoEnvioCorreoReporte('rango')}
+                              style={{
+                                flex: 1,
+                                padding: '0.4rem 0.5rem',
+                                fontSize: '0.78rem',
+                                fontWeight: '700',
+                                borderRadius: '8px',
+                                border: tipoEnvioCorreoReporte === 'rango' ? '1px solid #f97316' : '1px solid var(--glass-border)',
+                                background: tipoEnvioCorreoReporte === 'rango' ? 'rgba(249, 115, 22, 0.15)' : 'transparent',
+                                color: tipoEnvioCorreoReporte === 'rango' ? '#f97316' : 'var(--text-secondary)',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              📅 Período ({fechaInicioImpresion === fechaFinImpresion ? fechaInicioImpresion : `${fechaInicioImpresion} al ${fechaFinImpresion}`})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTipoEnvioCorreoReporte('turno')}
+                              style={{
+                                flex: 1,
+                                padding: '0.4rem 0.5rem',
+                                fontSize: '0.78rem',
+                                fontWeight: '700',
+                                borderRadius: '8px',
+                                border: tipoEnvioCorreoReporte === 'turno' ? '1px solid #f97316' : '1px solid var(--glass-border)',
+                                background: tipoEnvioCorreoReporte === 'turno' ? 'rgba(249, 115, 22, 0.15)' : 'transparent',
+                                color: tipoEnvioCorreoReporte === 'turno' ? '#f97316' : 'var(--text-secondary)',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              ⏰ {filtroTurnoImpresion !== 'all' ? `Turno #${filtroTurnoImpresion}` : 'Turno Activo'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {mensajeCorreoReporte && (
+                          <div className={`alert alert-${tipoMensajeCorreoReporte}`} style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', marginBottom: '0.75rem', borderRadius: '8px' }}>
+                            <span>{mensajeCorreoReporte}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={enviandoCorreoReporte}
+                        onClick={async () => {
+                          try {
+                            setEnviandoCorreoReporte(true);
+                            setMensajeCorreoReporte('');
+                            const payload = tipoEnvioCorreoReporte === 'rango'
+                              ? { tipo: 'rango', fecha_inicio: fechaInicioImpresion, fecha_fin: fechaFinImpresion }
+                              : (filtroTurnoImpresion && filtroTurnoImpresion !== 'all' ? { tipo: 'turno', turno_id: filtroTurnoImpresion } : { tipo: 'turno' });
+
+                            const response = await fetch('http://127.0.0.1:5000/api/reportes/enviar', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(payload)
+                            });
+                            const data = await response.json();
+                            if (response.ok && data.success) {
+                              setTipoMensajeCorreoReporte('success');
+                              setMensajeCorreoReporte(data.message || '¡Reporte enviado exitosamente!');
+                            } else {
+                              setTipoMensajeCorreoReporte('error');
+                              setMensajeCorreoReporte(data.message || 'Error al enviar el reporte.');
+                            }
+                          } catch (err) {
+                            console.error(err);
+                            setTipoMensajeCorreoReporte('error');
+                            setMensajeCorreoReporte('Error de red al intentar enviar el correo.');
+                          } finally {
+                            setEnviandoCorreoReporte(false);
+                          }
+                        }}
+                        style={{ width: '100%', padding: '0.8rem 1rem', fontSize: '0.9rem', fontWeight: '700', borderRadius: '50px', background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 4px 12px rgba(234, 88, 12, 0.25)', cursor: 'pointer' }}
+                      >
+                        {enviandoCorreoReporte ? '⏳ Enviando Reporte...' : (
+                          tipoEnvioCorreoReporte === 'rango'
+                            ? `📧 Enviar Período al Correo`
+                            : `📧 Enviar Turno al Correo`
+                        )}
                       </button>
                     </div>
 
